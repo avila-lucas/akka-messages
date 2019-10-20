@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit
 import akka.actor.{ActorLogging, ActorSelection, Props}
 import akka.persistence.{AtLeastOnceDelivery, PersistentActor}
 import akka.routing.{ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic}
-import com.omnipresent.AkkaMessagesSupervisor.CreateProducer
+import com.omnipresent.system.Master.CreateProducer
 import com.omnipresent.model.Consumer.{ConsumedJob, Job}
 import com.omnipresent.model.MessagesQueueProxy.{FailedReception, Produce, Start}
 import com.omnipresent.model.Producer.DeliverJob

@@ -1,8 +1,8 @@
 package com.omnipresent.support
 
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
-import com.omnipresent.AkkaMessagesSupervisor.{ ActionPerformed, CreateProducer, CreateQueue }
-import com.omnipresent.{ ProducerCreationResult, QueueInfo, QueuesNames }
+import com.omnipresent.system.Master._
+import com.omnipresent.system.{ProducerCreationResult, QueuesNames}
 import spray.json.DefaultJsonProtocol
 
 trait JsonSupport extends SprayJsonSupport {
@@ -11,7 +11,6 @@ trait JsonSupport extends SprayJsonSupport {
   import DefaultJsonProtocol._
 
   implicit val queueNamesFormat = jsonFormat1(QueuesNames)
-  implicit val queueInfoFormat = jsonFormat1(QueueInfo)
   implicit val producerCreationResultFormat = jsonFormat1(ProducerCreationResult)
   implicit val createProducerFormat = jsonFormat3(CreateProducer)
   implicit val createQueueFormat = jsonFormat5(CreateQueue)
