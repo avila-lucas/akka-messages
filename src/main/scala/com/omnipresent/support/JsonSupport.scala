@@ -13,7 +13,7 @@ trait JsonSupport extends SprayJsonSupport {
   implicit val queueNamesFormat = jsonFormat1(QueuesNames)
   implicit val queueInfoFormat = jsonFormat1(QueueInfo)
   implicit val producerCreationResultFormat = jsonFormat1(ProducerCreationResult)
-  implicit val createProducerFormat = jsonFormat2(CreateProducer)
+  implicit val createProducerFormat = jsonFormat3(CreateProducer)
   implicit val createQueueFormat = jsonFormat5(CreateQueue)
 
   implicit val actionPerformedJsonFormat = jsonFormat1(ActionPerformed)

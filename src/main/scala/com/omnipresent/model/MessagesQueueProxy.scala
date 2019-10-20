@@ -1,12 +1,12 @@
 package com.omnipresent.model
 
-import akka.actor.{ Actor, ActorLogging, Props, _ }
+import akka.actor.{Actor, ActorLogging, Props, _}
 import akka.routing._
-import com.omnipresent.model.Consumer.{ ConfirmReception, PerformCalculation }
-import com.omnipresent.model.MessagesQueueProxy.{ FailedReception, TimedOut }
-import org.apache.commons.lang3.time.StopWatch
+import com.omnipresent.model.Consumer.{ConsumedJob, Job}
+import com.omnipresent.model.MessagesQueueProxy.{FailedReception, TimedOut}
 
-import scala.concurrent.duration.{ FiniteDuration, _ }
+import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.duration.{FiniteDuration, _}
 
 object MessagesQueueProxy {
 
@@ -16,7 +16,7 @@ object MessagesQueueProxy {
 
   final case object TimedOut
 
-  final case class FailedReception(job: PerformCalculation)
+  final case class FailedReception(job: Job)
 
   final case class Rejected(id: String)
 
@@ -30,16 +30,15 @@ object MessagesQueueProxy {
  */
 class MessagesQueueProxy(spreadType: String, workers: Int)
   extends Actor
-  with ActorLogging {
+    with ActorLogging {
 
   val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
   var consumersRouter: Router = createRouter(Props[Consumer], "consumer", spread, workers)
 
   def receive: Receive = {
-    case j: PerformCalculation =>
-      val jobForConsumer = PerformCalculation(j.jobId, j.deliveryId, StopWatch.createStarted())
+    case job: Job =>
       val queue = sender()
-      context.actorOf(Props(new WaitingConfirmator(consumersRouter, jobForConsumer, queue)))
+      context.actorOf(Props(new WaitingConfirmator(consumersRouter, job, queue)))
     case _ => // TODO
   }
 
@@ -53,34 +52,39 @@ class MessagesQueueProxy(spreadType: String, workers: Int)
   }
 }
 
-class WaitingConfirmator(router: Router, job: PerformCalculation, queue: ActorRef) extends Actor with ActorLogging {
-  var valueResults = List.empty[ConfirmReception]
-  implicit val ex = context.system.dispatcher
+class WaitingConfirmator(router: Router, job: Job, queue: ActorRef) extends Actor with ActorLogging {
 
-  val timeoutScheduled = context.system.scheduler.scheduleOnce(5.seconds, self, TimedOut)
+  implicit val ex: ExecutionContextExecutor = context.system.dispatcher
+  var confirmationList = List.empty[ConsumedJob]
+  val timeoutScheduled: Cancellable = context.system.scheduler.scheduleOnce(20.seconds, self, TimedOut)
 
-  override def preStart(): Unit = {
-    router.route(job, self)
-    log.info(s"[${job.jobId}] SENT to workers")
-  }
+  override def preStart(): Unit = router.route(job, self)
+
+  override def postStop(): Unit = timeoutScheduled.cancel()
 
   override def receive: Receive = {
-    case confirmed: ConfirmReception =>
+    case consumed: ConsumedJob =>
       log.info(s"[${job.jobId}] ACK")
-      valueResults = confirmed :: valueResults
-      answerIfDone(confirmed)
+      confirmationList = consumed :: confirmationList
+      answerIfDone(consumed)
     case TimedOut =>
-      log.warning(s"[${job.jobId}] TIMEDOUT")
+      log.warning(s"[${job.jobId}] TIMED OUT")
       queue ! FailedReception(job)
       context stop self
   }
 
-  def answerIfDone(confirmation: ConfirmReception) = {
-    if (valueResults.size == router.routees.size) {
-      log.info(s"[${job.jobId}] ALL ACKs")
-      timeoutScheduled.cancel()
-      queue ! confirmation
-      context stop self
+  private def answerIfDone(consumedJob: ConsumedJob) {
+    router.logic match {
+      case _: BroadcastRoutingLogic if confirmationList.size == router.routees.size =>
+        acknowledge(consumedJob)
+      case _ => acknowledge(consumedJob)
     }
   }
+
+  private def acknowledge(consumedJob: ConsumedJob) = {
+    log.info(s"[${job.jobId}] ACKNOWLEDGE")
+    queue ! consumedJob
+    context stop self
+  }
+
 }

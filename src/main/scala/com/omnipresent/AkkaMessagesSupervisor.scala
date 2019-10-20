@@ -24,7 +24,7 @@ object AkkaMessagesSupervisor {
 
   final case class CreateQueue(name: String, producers: Int, workers: Int, jobInterval: Long, spreadType: String = "RR")
 
-  final case class CreateProducer(queueName: String, productionCapacity: Int)
+  final case class CreateProducer(queueName: String, interval: Long, transactional: Boolean)
 
   def props(): Props = Props[AkkaMessagesSupervisor]
 }
@@ -48,10 +48,10 @@ class AkkaMessagesSupervisor extends Actor with ActorLogging {
     case details: CreateQueue =>
       createQueue(details)
       sender() ! ActionPerformed(s"Queue [${details.name}] created")
-    case CreateProducer(queueName, _) =>
+    case createProducer: CreateProducer =>
       val result = queues
-        .get(queueName)
-        .map(_ => context.actorOf(Props[Producer]))
+        .get(createProducer.queueName)
+        .map(queue => queue ! createProducer)
         .isDefined
       sender() ! ProducerCreationResult(result)
   }

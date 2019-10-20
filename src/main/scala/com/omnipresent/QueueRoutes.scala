@@ -58,7 +58,7 @@ trait QueueRoutes extends JsonSupport {
                 val producerCreated: Future[ProducerCreationResult] =
                   (akkaMessagesSupervisor ? newProducer).mapTo[ProducerCreationResult]
                 onSuccess(producerCreated) { performed =>
-                  log.info(s"Created producer [${performed.created}] for [${newProducer.queueName}] with capacity ${newProducer.productionCapacity}")
+                  log.info(s"Created producer [${performed.created}] for [${newProducer.queueName}] with capacity ${newProducer.transactional}")
                   complete((StatusCodes.Created, performed))
                 }
               }
