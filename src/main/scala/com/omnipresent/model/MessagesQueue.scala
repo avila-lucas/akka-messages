@@ -6,13 +6,13 @@ import java.util.concurrent.TimeUnit
 import akka.actor.{ActorLogging, ActorSelection, Props}
 import akka.persistence.{AtLeastOnceDelivery, PersistentActor}
 import akka.routing.{ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic}
-import com.omnipresent.system.Master.CreateProducer
 import com.omnipresent.model.Consumer.{ConsumedJob, Job}
 import com.omnipresent.model.MessagesQueueProxy.{FailedReception, Produce, Start}
 import com.omnipresent.model.Producer.DeliverJob
+import com.omnipresent.system.Master.CreateProducer
 import org.apache.commons.lang3.time.StopWatch
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{FiniteDuration, _}
 
 sealed trait Evt
 
@@ -33,22 +33,32 @@ class MessagesQueue(producers: Int, proxyQueue: ActorSelection)
 
   override def persistenceId: String = s"queue-${UUID.randomUUID()}"
 
+  override def redeliverInterval: FiniteDuration = 10.seconds
+
+  override def maxUnconfirmedMessages = 100
+
   var producerRouter: Router = createRouter(Props(new Producer(false)), "producer", BroadcastRoutingLogic(), producers)
 
   override def receiveCommand: Receive = {
+
     case Start(interval) =>
       producerRouter.route(Produce(interval), self)
+
     case CreateProducer(_, interval, transactional) =>
       val name = s"${persistenceId}_producer_${producerRouter.routees.size + 1}"
       val producer = context.actorOf(Props(new Producer(transactional)), name)
       producerRouter.addRoutee(producer)
       producer ! Produce(FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+
     case job: DeliverJob =>
       persist(MsgToSend(job))(updateState)
+
     case ConsumedJob(jobId, deliveryId) =>
       persist(MsgConfirmed(jobId, deliveryId))(updateState)
+
     case FailedReception(job) =>
       persist(MsgFailed(job.jobId, job.deliveryId))(updateState)
+
   }
 
   override def receiveRecover: Receive = {
@@ -56,13 +66,17 @@ class MessagesQueue(producers: Int, proxyQueue: ActorSelection)
   }
 
   def updateState(evt: Evt): Unit = evt match {
+
     case MsgToSend(job) =>
       log.info(s"[${job.id}] RECEIVED (queue)")
       deliver(proxyQueue)(deliveryId => Job(job.id, deliveryId, StopWatch.createStarted(), job.transactional))
+
     case MsgConfirmed(jobId, deliveryId) =>
-      log.info(s"[$jobId] REMOVED [${confirmDelivery(deliveryId)}]")
+      log.info(s"[$jobId] CONFIRMED [${confirmDelivery(deliveryId)}]")
+
     case MsgFailed(_, _) =>
       log.info(s"[$numberOfUnconfirmed] UNCONFIRMED JOBS")
+
   }
 
   private def createRouter(props: Props, nameType: String, routingLogic: RoutingLogic, quantity: Int) = {

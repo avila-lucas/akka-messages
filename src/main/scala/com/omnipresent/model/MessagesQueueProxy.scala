@@ -52,7 +52,9 @@ class MessagesQueueProxy(spreadType: String, workers: Int)
   }
 }
 
-class WaitingConfirmator(router: Router, job: Job, queue: ActorRef) extends Actor with ActorLogging {
+class WaitingConfirmator(router: Router, job: Job, queue: ActorRef)
+  extends Actor
+    with ActorLogging {
 
   implicit val ex: ExecutionContextExecutor = context.system.dispatcher
   var confirmationList = List.empty[ConsumedJob]
@@ -63,14 +65,17 @@ class WaitingConfirmator(router: Router, job: Job, queue: ActorRef) extends Acto
   override def postStop(): Unit = timeoutScheduled.cancel()
 
   override def receive: Receive = {
+
     case consumed: ConsumedJob =>
       log.info(s"[${job.jobId}] ACK")
       confirmationList = consumed :: confirmationList
       answerIfDone(consumed)
+
     case TimedOut =>
       log.warning(s"[${job.jobId}] TIMED OUT")
       queue ! FailedReception(job)
       context stop self
+
   }
 
   private def answerIfDone(consumedJob: ConsumedJob) {
@@ -81,7 +86,7 @@ class WaitingConfirmator(router: Router, job: Job, queue: ActorRef) extends Acto
     }
   }
 
-  private def acknowledge(consumedJob: ConsumedJob) = {
+  private def acknowledge(consumedJob: ConsumedJob) {
     log.info(s"[${job.jobId}] ACKNOWLEDGE")
     queue ! consumedJob
     context stop self
