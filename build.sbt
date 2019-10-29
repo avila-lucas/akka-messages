@@ -11,6 +11,8 @@ lazy val root = (project in file(".")).
     libraryDependencies ++= Seq(
       "org.apache.commons"  %  "commons-lang3"             % "3.9",
       "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.5.15.2",
+      "com.typesafe.akka"   %% "akka-multi-node-testkit"   % akkaVersion,
+      "com.typesafe.akka"   %% "akka-cluster-sharding"     % akkaVersion,
       "com.typesafe.akka"   %% "akka-cluster-tools"        % akkaVersion,
       "com.typesafe.akka"   %% "akka-persistence"          % akkaVersion,
       "com.typesafe.akka"   %% "akka-http"                 % akkaHttpVersion,

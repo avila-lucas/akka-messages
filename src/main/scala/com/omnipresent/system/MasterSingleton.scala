@@ -6,12 +6,12 @@ import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerS
 object MasterSingleton {
 
   private val singletonName = "master"
-  private val singletonRole = "night-watch"
+  private val singletonRole = "master"
 
-  def startSingleton(system: ActorSystem): ActorRef = {
+  def startSingleton(system: ActorSystem, broadcastRegion: ActorRef, pubSubRegion: ActorRef): ActorRef = {
     system.actorOf(
       ClusterSingletonManager.props(
-        Master.props(),
+        Master.props(broadcastRegion, pubSubRegion),
         PoisonPill,
         ClusterSingletonManagerSettings(system).withRole(singletonRole)
       ),

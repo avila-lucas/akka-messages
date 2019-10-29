@@ -3,6 +3,7 @@ package com.omnipresent.model
 import akka.actor.{Actor, ActorLogging, Props, _}
 import akka.routing._
 import com.omnipresent.model.Consumer.{ConsumedJob, Job}
+import com.omnipresent.model.MessagesQueue.ProxyJob
 import com.omnipresent.model.MessagesQueueProxy.{FailedReception, TimedOut}
 
 import scala.concurrent.ExecutionContextExecutor
@@ -11,8 +12,6 @@ import scala.concurrent.duration.{FiniteDuration, _}
 object MessagesQueueProxy {
 
   final case class Produce(interval: FiniteDuration)
-
-  final case class Start(interval: FiniteDuration)
 
   final case object TimedOut
 
@@ -36,9 +35,15 @@ class MessagesQueueProxy(spreadType: String, workers: Int)
   var consumersRouter: Router = createRouter(Props[Consumer], "consumer", spread, workers)
 
   def receive: Receive = {
-    case job: Job =>
+    case ProxyJob(jobId, deliveryId, watch, transactional) =>
       val queue = sender()
-      context.actorOf(Props(new WaitingConfirmator(consumersRouter, job, queue)))
+      val consumerJob = Job(
+        consumerName = "consumer_1",
+        jobId = jobId,
+        deliveryId = deliveryId,
+        watch = watch,
+        transactional = transactional)
+      context.actorOf(Props(new WaitingConfirmator(consumersRouter, consumerJob, queue)))
     case _ => // TODO
   }
 
