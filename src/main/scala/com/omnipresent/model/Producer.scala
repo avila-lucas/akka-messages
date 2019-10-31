@@ -2,8 +2,8 @@ package com.omnipresent.model
 
 import java.util.UUID
 
-import akka.actor.{Actor, ActorLogging}
-import com.omnipresent.model.MessagesQueueProxy.{Produce, Rejected}
+import akka.actor.{ Actor, ActorLogging }
+import com.omnipresent.model.MessagesQueueProxy.{ Produce, Rejected }
 import com.omnipresent.model.Producer.DeliverJob
 
 import scala.concurrent.duration.FiniteDuration

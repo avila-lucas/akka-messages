@@ -1,6 +1,6 @@
 package com.omnipresent.system
 
-import com.omnipresent.system.QueueSystemState.{AddNewQueue, QueueSystemEvent}
+import com.omnipresent.system.QueueSystemState.{ AddNewQueue, QueueSystemEvent }
 
 object QueueSystemState {
 
@@ -12,7 +12,7 @@ object QueueSystemState {
 
 }
 
-case class QueueSystemState private(private val queues: Set[String]) {
+case class QueueSystemState private (private val queues: Set[String]) {
 
   def updated(event: QueueSystemEvent): QueueSystemState = event match {
     case AddNewQueue(queueName) ⇒

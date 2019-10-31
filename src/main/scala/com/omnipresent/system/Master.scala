@@ -2,13 +2,17 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorRef, Props}
-import akka.persistence.{PersistentActor, RecoveryCompleted}
+import akka.actor.{ ActorLogging, ActorRef, Props }
+import akka.cluster.sharding.ClusterSharding
+import akka.persistence.{ PersistentActor, RecoveryCompleted }
+import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.Start
-import com.omnipresent.system.Master.{ActionPerformed, CreateProducer, CreateQueue, GetQueuesNames}
-import com.omnipresent.system.QueueSystemState.{AddNewQueue, QueueSystemEvent}
+import com.omnipresent.system.Master.{ ActionPerformed, CreateProducer, CreateQueue, GetQueuesNames }
+import com.omnipresent.system.QueueSystemState.{ AddNewQueue, QueueSystemEvent }
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 final case class ProducerCreationResult(created: Boolean)
 
@@ -16,7 +20,7 @@ final case class QueuesNames(queues: Set[String])
 
 object Master {
 
-  def props(broadcast: ActorRef, pubSub: ActorRef): Props = Props(new Master(broadcast, pubSub))
+  def props: Props = Props(new Master)
 
   final case class ActionPerformed(description: String)
 
@@ -30,13 +34,19 @@ object Master {
 
 }
 
-class Master(broadcastRegion: ActorRef, pubSubRegion: ActorRef)
+class Master
   extends PersistentActor
-    with ActorLogging {
+  with ActorLogging {
 
   override val persistenceId: String = "master"
 
+  private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
+
+  private val pubSubRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.pubSubShardName)
+
   private var queueSystemState = QueueSystemState.empty
+
+  implicit val ec: ExecutionContext = context.dispatcher
 
   override def preStart(): Unit = log.info("Akka Messages Master application started")
 

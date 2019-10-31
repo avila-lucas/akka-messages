@@ -1,47 +1,38 @@
 package com.omnipresent
 
-import akka.actor.ActorSystem
-import akka.cluster.Cluster
-import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
+import akka.actor.{ ActorRef, ActorSystem, Props }
+import akka.cluster.sharding.{ ClusterSharding, ClusterShardingSettings }
+import akka.cluster.singleton.{ ClusterSingletonProxy, ClusterSingletonProxySettings }
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
-import com.omnipresent.model.{Consumer, MessagesQueue}
+import com.omnipresent.model.{ Consumer, MessagesQueue }
+import com.omnipresent.system.Master.CreateQueue
 import com.omnipresent.system.MasterSingleton
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.util.{ Failure, Success }
 
-object Main extends App with QueueRoutes {
+object AkkaMessages {
 
-  implicit val system: ActorSystem = ActorSystem("akkaMessages-system")
-  implicit val materializer: ActorMaterializer = ActorMaterializer()
-  implicit val executionContext: ExecutionContext = system.dispatcher
-
-  startup(Seq(2551, 2552))
-  val masterProxy = system.actorOf(MasterSingleton.proxyProps(system), name = "masterProxy")
-
-  lazy val routes: Route = queueRoutes
-
-  val serverBinding: Future[Http.ServerBinding] = Http().bindAndHandle(routes, "localhost", 8080)
-
-  serverBinding.onComplete {
-    case Success(bound) =>
-      println(s"Server online at http://${bound.localAddress.getHostString}:${bound.localAddress.getPort}/")
-    case Failure(e) =>
-      Console.err.println(s"Server could not start!")
-      e.printStackTrace()
-      system.terminate()
+  def main(args: Array[String]): Unit = {
+    if (args.isEmpty)
+      startup(Seq("2551", "2552", "0"))
+    else
+      startup(args)
   }
 
-  Await.result(system.whenTerminated, Duration.Inf)
+  def startup(ports: Seq[String]): Unit = {
+    if (ports.contains("8080")) {
+      new HttpApi()
+    } else {
+      ports foreach { port =>
+        val config = ConfigFactory.parseString("akka.remote.artery.canonical.port=" + port).
+          withFallback(ConfigFactory.load())
 
-  def startup(ports: Seq[Int]) =
-    ports foreach {
-      port =>
-        val system = ActorSystem("akkaMessages-system")
+        val system = ActorSystem("akkaMessages", config)
 
         val consumerRegion = ClusterSharding(system).start(
           typeName = Consumer.shardName,
@@ -64,19 +55,46 @@ object Main extends App with QueueRoutes {
           extractEntityId = MessagesQueue.entityIdExtractor,
           extractShardId = MessagesQueue.shardIdExtractor)
 
-        if(port == 2551)
-          MasterSingleton.startSingleton(
-            system = ActorSystem("akkaMessages-system", config(port, "master")),
-            broadcastRegion = broadcastQueuesRegion,
-            pubSubRegion = pubSubQueuesRegion
-          )
-    }
+        MasterSingleton.startSingleton(system = system)
 
-  def config(port: Int, role: String): Config =
-    ConfigFactory.parseString(
-      s"""
-      akka.remote.netty.tcp.port=$port
-      akka.cluster.roles=[$role]
-    """).withFallback(ConfigFactory.load())
+        val masterProxy: ActorRef = system.actorOf(
+          ClusterSingletonProxy.props(
+            singletonManagerPath = "/user/master",
+            settings = ClusterSingletonProxySettings(system)),
+          name = "masterProxy")
+
+        masterProxy ! CreateQueue(s"queue_$port", 1, 1, 1)
+      }
+    }
+  }
+
 }
 
+class HttpApi extends QueueRoutes {
+
+  implicit val system: ActorSystem = ActorSystem("akkaMessages")
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
+  implicit val executionContext: ExecutionContext = system.dispatcher
+
+  val masterProxy: ActorRef = system.actorOf(
+    ClusterSingletonProxy.props(
+      singletonManagerPath = "/user/master",
+      settings = ClusterSingletonProxySettings(system)),
+    name = "masterProxy")
+
+  lazy val routes: Route = queueRoutes
+
+  val serverBinding: Future[Http.ServerBinding] = Http().bindAndHandle(routes, "localhost", 8080)
+
+  serverBinding.onComplete {
+    case Success(bound) =>
+      println(s"Server online at http://${bound.localAddress.getHostString}:${bound.localAddress.getPort}/")
+    case Failure(e) =>
+      Console.err.println(s"Server could not start!")
+      e.printStackTrace()
+      system.terminate()
+  }
+
+  Await.result(system.whenTerminated, Duration.Inf)
+
+}

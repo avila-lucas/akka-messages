@@ -2,18 +2,18 @@ package com.omnipresent.model
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorRef, ActorSelection, Props}
+import akka.actor.{ ActorLogging, ActorRef, ActorSelection, Props }
 import akka.cluster.sharding.ShardRegion
-import akka.persistence.{AtLeastOnceDelivery, PersistentActor}
-import akka.routing.{ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic}
+import akka.persistence.{ AtLeastOnceDelivery, PersistentActor }
+import akka.routing.{ ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic }
 import com.omnipresent.model.Consumer.ConsumedJob
-import com.omnipresent.model.MessagesQueue.{ProxyJob, Start}
-import com.omnipresent.model.MessagesQueueProxy.{FailedReception, Produce}
+import com.omnipresent.model.MessagesQueue.{ ProxyJob, Start }
+import com.omnipresent.model.MessagesQueueProxy.{ FailedReception, Produce }
 import com.omnipresent.model.Producer.DeliverJob
 import com.omnipresent.system.Master.CreateProducer
 import org.apache.commons.lang3.time.StopWatch
 
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 
 object MessagesQueue {
 
@@ -32,7 +32,7 @@ object MessagesQueue {
   }
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
-    case s: Start => (math.abs(s.queueName.hashCode) % 100).toString
+    case s: Start => (math.abs(s.queueName.split("_").last.toInt.hashCode) % 100).toString
     case d: DeliverJob => (math.abs(d.queueName.hashCode) % 100).toString
     case GetQueue(queueName) => (math.abs(queueName.hashCode) % 100).toString
   }
@@ -43,8 +43,8 @@ object MessagesQueue {
 
 class MessagesQueue(spreadType: String, consumerRegion: ActorRef)
   extends PersistentActor
-    with AtLeastOnceDelivery
-    with ActorLogging {
+  with AtLeastOnceDelivery
+  with ActorLogging {
 
   override def persistenceId: String = "Queue-" + self.path.name
 
@@ -90,6 +90,7 @@ class MessagesQueue(spreadType: String, consumerRegion: ActorRef)
         routingLogic = BroadcastRoutingLogic(),
         quantity = producers)
       log.info("Producers were created")
+
       val proxyQueue = context.actorOf(Props(new MessagesQueueProxy(spreadType, workers)), s"${queueName}_proxy")
       proxyQueueSelection = Some(context.actorSelection(proxyQueue.path))
       log.info("Proxy queue created")

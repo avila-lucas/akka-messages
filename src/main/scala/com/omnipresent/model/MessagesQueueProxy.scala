@@ -1,13 +1,13 @@
 package com.omnipresent.model
 
-import akka.actor.{Actor, ActorLogging, Props, _}
+import akka.actor.{ Actor, ActorLogging, Props, _ }
 import akka.routing._
-import com.omnipresent.model.Consumer.{ConsumedJob, Job}
+import com.omnipresent.model.Consumer.{ ConsumedJob, Job }
 import com.omnipresent.model.MessagesQueue.ProxyJob
-import com.omnipresent.model.MessagesQueueProxy.{FailedReception, TimedOut}
+import com.omnipresent.model.MessagesQueueProxy.{ FailedReception, TimedOut }
 
 import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 
 object MessagesQueueProxy {
 
@@ -29,7 +29,7 @@ object MessagesQueueProxy {
  */
 class MessagesQueueProxy(spreadType: String, workers: Int)
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
   var consumersRouter: Router = createRouter(Props[Consumer], "consumer", spread, workers)
@@ -59,7 +59,7 @@ class MessagesQueueProxy(spreadType: String, workers: Int)
 
 class WaitingConfirmator(router: Router, job: Job, queue: ActorRef)
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   implicit val ex: ExecutionContextExecutor = context.system.dispatcher
   var confirmationList = List.empty[ConsumedJob]
