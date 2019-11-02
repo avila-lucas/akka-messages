@@ -1,27 +1,26 @@
 package com.omnipresent.system
 
-import akka.actor.ActorRef
-import com.omnipresent.system.QueueSystemState.{AddNewQueue, QueueSystemEvent}
+import com.omnipresent.system.QueueSystemState.{ AddNewQueue, QueueSystemEvent }
 
 object QueueSystemState {
 
-  def empty: QueueSystemState = QueueSystemState(queues = Map.empty[String, ActorRef])
+  def empty: QueueSystemState = QueueSystemState(queues = Set.empty[String])
 
   trait QueueSystemEvent
 
-  final case class AddNewQueue(queueName: String, queue: ActorRef) extends QueueSystemEvent
+  final case class AddNewQueue(queueName: String) extends QueueSystemEvent
 
 }
 
-case class QueueSystemState private(private val queues: Map[String, ActorRef]) {
+case class QueueSystemState private (private val queues: Set[String]) {
 
   def updated(event: QueueSystemEvent): QueueSystemState = event match {
-    case AddNewQueue(queueName, queue) ⇒
-      copy(queues = queues.updated(queueName, queue))
+    case AddNewQueue(queueName) ⇒
+      copy(queues = queues + queueName)
   }
 
-  def queueNames: Set[String] = queues.keySet
+  def queueNames: Set[String] = queues
 
-  def find(name: String): Option[ActorRef] = queues.get(name)
+  def find(name: String): Option[String] = queues.find(_.equalsIgnoreCase(name))
 
 }

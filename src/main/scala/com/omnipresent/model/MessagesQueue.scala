@@ -1,53 +1,72 @@
 package com.omnipresent.model
 
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorSelection, Props}
-import akka.persistence.{AtLeastOnceDelivery, PersistentActor}
-import akka.routing.{ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic}
-import com.omnipresent.model.Consumer.{ConsumedJob, Job}
-import com.omnipresent.model.MessagesQueueProxy.{FailedReception, Produce, Start}
+import akka.actor.{ ActorLogging, ActorRef, ActorSelection, Props }
+import akka.cluster.sharding.ShardRegion
+import akka.persistence.{ AtLeastOnceDelivery, PersistentActor }
+import akka.routing.{ ActorRefRoutee, BroadcastRoutingLogic, Router, RoutingLogic }
+import com.omnipresent.model.Consumer.ConsumedJob
+import com.omnipresent.model.MessagesQueue.{ ProxyJob, Start }
+import com.omnipresent.model.MessagesQueueProxy.{ FailedReception, Produce }
 import com.omnipresent.model.Producer.DeliverJob
 import com.omnipresent.system.Master.CreateProducer
 import org.apache.commons.lang3.time.StopWatch
 
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 
-sealed trait Evt
+object MessagesQueue {
 
-case class MsgToSend(job: DeliverJob) extends Evt
+  final case class Start(queueName: String, producers: Int, workers: Int, interval: FiniteDuration)
 
-case class MsgConfirmed(jobId: String, deliveryId: Long) extends Evt
+  final case class ProxyJob(jobId: String, deliveryId: Long, watch: StopWatch, transactional: Boolean)
 
-case class MsgFailed(jobId: String, deliveryId: Long) extends Evt
+  def props(spreadType: String, consumerRegion: ActorRef): Props = Props(new MessagesQueue(spreadType, consumerRegion))
 
-/**
- * The "REAL" queue, this will keep track of confirmed and unconfirmed messages; With persistentActor we might
- * be able to recover the state and reDeliver the messages.
- */
-class MessagesQueue(producers: Int, proxyQueue: ActorSelection)
+  case class GetQueue(queueName: String)
+
+  val entityIdExtractor: ShardRegion.ExtractEntityId = {
+    case s: Start => (s.queueName, s)
+    case d: DeliverJob => (d.queueName, d)
+    case g: GetQueue => (g.queueName, g)
+  }
+
+  val shardIdExtractor: ShardRegion.ExtractShardId = {
+    case s: Start => (math.abs(s.queueName.split("_").last.toInt.hashCode) % 100).toString
+    case d: DeliverJob => (math.abs(d.queueName.hashCode) % 100).toString
+    case GetQueue(queueName) => (math.abs(queueName.hashCode) % 100).toString
+  }
+
+  val pubSubShardName: String = "Queues-PubSub"
+  val broadcastShardName: String = "Queues-Broadcast"
+}
+
+class MessagesQueue(spreadType: String, consumerRegion: ActorRef)
   extends PersistentActor
-    with AtLeastOnceDelivery
-    with ActorLogging {
+  with AtLeastOnceDelivery
+  with ActorLogging {
 
-  override def persistenceId: String = s"queue-${UUID.randomUUID()}"
+  override def persistenceId: String = "Queue-" + self.path.name
 
   override def redeliverInterval: FiniteDuration = 10.seconds
 
   override def maxUnconfirmedMessages = 100
 
-  var producerRouter: Router = createRouter(Props(new Producer(false)), "producer", BroadcastRoutingLogic(), producers)
+  var proxyQueueSelection: Option[ActorSelection] = None
+
+  override def receiveRecover: Receive = {
+    case evt: Event => updateState(evt)
+  }
 
   override def receiveCommand: Receive = {
 
-    case Start(interval) =>
-      producerRouter.route(Produce(interval), self)
+    case start: Start =>
+      log.info("Received msg start")
+      persist(MsgStartQueue(start))(updateState)
 
     case CreateProducer(_, interval, transactional) =>
-      val name = s"${persistenceId}_producer_${producerRouter.routees.size + 1}"
-      val producer = context.actorOf(Props(new Producer(transactional)), name)
-      producerRouter.addRoutee(producer)
+      //val name = s"${persistenceId}_producer_${producerRouter.routees.size + 1}"
+      val producer = context.actorOf(Props(new Producer(persistenceId, transactional)), "test")
       producer ! Produce(FiniteDuration(interval.toLong, TimeUnit.SECONDS))
 
     case job: DeliverJob =>
@@ -61,15 +80,26 @@ class MessagesQueue(producers: Int, proxyQueue: ActorSelection)
 
   }
 
-  override def receiveRecover: Receive = {
-    case evt: Evt => updateState(evt)
-  }
+  def updateState(evt: Event): Unit = evt match {
 
-  def updateState(evt: Evt): Unit = evt match {
+    case MsgStartQueue(Start(queueName, producers, workers, interval)) =>
+      log.info("Starting")
+      val router = createRouter(
+        props = Props(new Producer(queueName, false)),
+        nameType = "producer",
+        routingLogic = BroadcastRoutingLogic(),
+        quantity = producers)
+      log.info("Producers were created")
+
+      val proxyQueue = context.actorOf(Props(new MessagesQueueProxy(spreadType, workers)), s"${queueName}_proxy")
+      proxyQueueSelection = Some(context.actorSelection(proxyQueue.path))
+      log.info("Proxy queue created")
+      router.route(Produce(interval), self)
+      log.info(s"Finished creating queue [$queueName]")
 
     case MsgToSend(job) =>
       log.info(s"[${job.id}] RECEIVED (queue)")
-      deliver(proxyQueue)(deliveryId => Job(job.id, deliveryId, StopWatch.createStarted(), job.transactional))
+      deliver(proxyQueueSelection.get)(deliveryId => ProxyJob(job.id, deliveryId, StopWatch.createStarted(), job.transactional))
 
     case MsgConfirmed(jobId, deliveryId) =>
       log.info(s"[$jobId] CONFIRMED [${confirmDelivery(deliveryId)}]")

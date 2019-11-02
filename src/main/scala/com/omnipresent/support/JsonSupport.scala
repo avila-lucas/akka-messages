@@ -2,7 +2,7 @@ package com.omnipresent.support
 
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import com.omnipresent.system.Master._
-import com.omnipresent.system.{ProducerCreationResult, QueuesNames}
+import com.omnipresent.system.{ ProducerCreationResult, QueuesNames }
 import spray.json.DefaultJsonProtocol
 
 trait JsonSupport extends SprayJsonSupport {

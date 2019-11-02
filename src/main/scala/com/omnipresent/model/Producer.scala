@@ -2,19 +2,19 @@ package com.omnipresent.model
 
 import java.util.UUID
 
-import akka.actor.{Actor, ActorLogging}
-import com.omnipresent.model.MessagesQueueProxy.{Produce, Rejected}
+import akka.actor.{ Actor, ActorLogging }
+import com.omnipresent.model.MessagesQueueProxy.{ Produce, Rejected }
 import com.omnipresent.model.Producer.DeliverJob
 
 import scala.concurrent.duration.FiniteDuration
 
 object Producer {
 
-  final case class DeliverJob(id: String, transactional: Boolean)
+  final case class DeliverJob(id: String, queueName: String, transactional: Boolean)
 
 }
 
-class Producer(transactional: Boolean) extends Actor with ActorLogging {
+class Producer(relatedQueue: String, transactional: Boolean) extends Actor with ActorLogging {
 
   override def receive: Receive = {
     case Produce(interval) =>
@@ -27,7 +27,7 @@ class Producer(transactional: Boolean) extends Actor with ActorLogging {
   def produce(interval: FiniteDuration) {
     val id = UUID.randomUUID().toString
     log.info(s"[$id] Job PRODUCED")
-    sender() ! DeliverJob(id, transactional)
+    sender() ! DeliverJob(id, relatedQueue, transactional)
 
     Thread.sleep(interval.toMillis)
 

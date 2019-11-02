@@ -2,14 +2,17 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorRef, Props}
-import akka.persistence.{PersistentActor, RecoveryCompleted}
-import com.omnipresent.model.MessagesQueueProxy.Start
-import com.omnipresent.model.{MessagesQueue, MessagesQueueProxy}
-import com.omnipresent.system.Master.{ActionPerformed, CreateProducer, CreateQueue, GetQueuesNames}
-import com.omnipresent.system.QueueSystemState.{AddNewQueue, QueueSystemEvent}
+import akka.actor.{ ActorLogging, ActorRef, Props }
+import akka.cluster.sharding.ClusterSharding
+import akka.persistence.{ PersistentActor, RecoveryCompleted }
+import com.omnipresent.model.MessagesQueue
+import com.omnipresent.model.MessagesQueue.Start
+import com.omnipresent.system.Master.{ ActionPerformed, CreateProducer, CreateQueue, GetQueuesNames }
+import com.omnipresent.system.QueueSystemState.{ AddNewQueue, QueueSystemEvent }
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 final case class ProducerCreationResult(created: Boolean)
 
@@ -17,7 +20,7 @@ final case class QueuesNames(queues: Set[String])
 
 object Master {
 
-  def props(): Props = Props(new Master)
+  def props: Props = Props(new Master)
 
   final case class ActionPerformed(description: String)
 
@@ -33,11 +36,17 @@ object Master {
 
 class Master
   extends PersistentActor
-    with ActorLogging {
+  with ActorLogging {
 
   override val persistenceId: String = "master"
 
+  private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
+
+  private val pubSubRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.pubSubShardName)
+
   private var queueSystemState = QueueSystemState.empty
+
+  implicit val ec: ExecutionContext = context.dispatcher
 
   override def preStart(): Unit = log.info("Akka Messages Master application started")
 
@@ -57,11 +66,11 @@ class Master
   override def receiveCommand: Receive = {
 
     case createProducer: CreateProducer =>
-      val result = queueSystemState
-        .find(createProducer.queueName)
-        .map(queue => queue ! createProducer)
-        .isDefined
-      sender() ! ProducerCreationResult(result)
+      //      val result = queueSystemState
+      //        .find(createProducer.queueName)
+      //        .map(queue => queue ! createProducer)
+      //        .isDefined
+      sender() ! ProducerCreationResult(false)
 
     case GetQueuesNames =>
       log.info("Collecting queues names")
@@ -69,20 +78,19 @@ class Master
 
     case details: CreateQueue =>
       log.info(s"Request to CREATE QUEUE: ${details.name}")
-      persist(AddNewQueue(details.name, createQueue(details))) { event ⇒
+      persist(AddNewQueue(details.name)) { event ⇒
+        createQueue(details)
         sender() ! ActionPerformed(s"Queue [${details.name}] created")
         queueSystemState = queueSystemState.updated(event)
       }
   }
 
-  private def createQueue(details: CreateQueue): ActorRef = {
+  private def createQueue(details: CreateQueue) =
     details match {
-      case CreateQueue(name, producers, workers, interval, spreadType) =>
-        val proxyQueue = context.actorOf(Props(new MessagesQueueProxy(spreadType, workers)), s"${name}_proxy")
-        val queue = context.actorOf(Props(new MessagesQueue(producers, context.actorSelection(proxyQueue.path))), name)
-        queue ! Start(FiniteDuration(interval.toLong, TimeUnit.SECONDS))
-        queue
+      case CreateQueue(name, producers, workers, interval, spreadType) if spreadType.equalsIgnoreCase("pubsub") =>
+        pubSubRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+      case CreateQueue(name, producers, workers, interval, _) =>
+        broadcastRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
     }
-  }
 
 }

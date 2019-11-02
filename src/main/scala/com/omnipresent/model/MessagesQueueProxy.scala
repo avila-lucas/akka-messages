@@ -1,18 +1,17 @@
 package com.omnipresent.model
 
-import akka.actor.{Actor, ActorLogging, Props, _}
+import akka.actor.{ Actor, ActorLogging, Props, _ }
 import akka.routing._
-import com.omnipresent.model.Consumer.{ConsumedJob, Job}
-import com.omnipresent.model.MessagesQueueProxy.{FailedReception, TimedOut}
+import com.omnipresent.model.Consumer.{ ConsumedJob, Job }
+import com.omnipresent.model.MessagesQueue.ProxyJob
+import com.omnipresent.model.MessagesQueueProxy.{ FailedReception, TimedOut }
 
 import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{ FiniteDuration, _ }
 
 object MessagesQueueProxy {
 
   final case class Produce(interval: FiniteDuration)
-
-  final case class Start(interval: FiniteDuration)
 
   final case object TimedOut
 
@@ -30,15 +29,21 @@ object MessagesQueueProxy {
  */
 class MessagesQueueProxy(spreadType: String, workers: Int)
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
   var consumersRouter: Router = createRouter(Props[Consumer], "consumer", spread, workers)
 
   def receive: Receive = {
-    case job: Job =>
+    case ProxyJob(jobId, deliveryId, watch, transactional) =>
       val queue = sender()
-      context.actorOf(Props(new WaitingConfirmator(consumersRouter, job, queue)))
+      val consumerJob = Job(
+        consumerName = "consumer_1",
+        jobId = jobId,
+        deliveryId = deliveryId,
+        watch = watch,
+        transactional = transactional)
+      context.actorOf(Props(new WaitingConfirmator(consumersRouter, consumerJob, queue)))
     case _ => // TODO
   }
 
@@ -54,7 +59,7 @@ class MessagesQueueProxy(spreadType: String, workers: Int)
 
 class WaitingConfirmator(router: Router, job: Job, queue: ActorRef)
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   implicit val ex: ExecutionContextExecutor = context.system.dispatcher
   var confirmationList = List.empty[ConsumedJob]
