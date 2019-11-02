@@ -28,7 +28,11 @@ Then Download this repo and let the IDE import all things. This might take a whi
 If you're interested in what does each command go to here: https://www.scala-sbt.org/1.x/docs/Command-Line-Reference.html
 
 ### Start this thing! 
-When you have all things ready just use your favorite IDE and run the main class or execute `sbt run` at the root directory :)
+Stand in the root directory of this project and execute
+```text
+sbt "runMain com.omnipresent.AkkaMessages 2551"
+```
+You should span several processes to see the sharding working. Run the same command with new ports such as 2552, 9000, etc.
 
 ## Endpoints
 Up to this date we have the following endpoints: 
@@ -50,7 +54,7 @@ To create queues.
   "producers": 1,
   "workers": 3,
   "jobInterval": 1,
-  "spreadType": "pubsub" // Any other type will default to RoundRobin
+  "spreadType": "pubsub"
 }
 ``` 
 
