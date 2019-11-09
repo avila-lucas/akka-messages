@@ -83,6 +83,8 @@ class Master
         sender() ! ActionPerformed(s"Queue [${details.name}] created")
         queueSystemState = queueSystemState.updated(event)
       }
+    case _ =>
+      log.warning("MISSED MESSAGE?")
   }
 
   private def createQueue(details: CreateQueue) =

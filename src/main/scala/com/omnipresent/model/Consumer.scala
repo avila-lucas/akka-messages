@@ -25,7 +25,9 @@ object Consumer {
   val shardName: String = "Consumers"
 }
 
-class Consumer extends Actor with ActorLogging {
+class Consumer
+  extends Actor
+  with ActorLogging {
 
   import Consumer._
 
