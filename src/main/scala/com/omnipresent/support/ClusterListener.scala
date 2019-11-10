@@ -1,9 +1,9 @@
 package com.omnipresent.support
 
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent.{MemberDowned, MemberUp}
-import akka.cluster.singleton.{ClusterSingletonProxy, ClusterSingletonProxySettings}
+import akka.cluster.ClusterEvent.{ MemberDowned, MemberUp }
+import akka.cluster.singleton.{ ClusterSingletonProxy, ClusterSingletonProxySettings }
 import com.omnipresent.QueueRoutes
 import com.omnipresent.support.ClusterListener.GetRoutes
 
@@ -16,7 +16,7 @@ object ClusterListener {
 
 class ClusterListener
   extends Actor
-    with QueueRoutes {
+  with QueueRoutes {
 
   val system: ActorSystem = context.system
   val cluster: Cluster = Cluster(context.system)
@@ -35,8 +35,10 @@ class ClusterListener
       sender() ! queueRoutes
     case MemberDowned(_) =>
       log.info("MEMBER DOWNED!")
+      log.info(s"Cluster state: ${cluster.state}")
     case MemberUp(_) =>
       log.info("MEMBER UP!")
+      log.info(s"Cluster state: ${cluster.state}")
   }
 
 }

@@ -2,16 +2,15 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ ActorLogging, ActorRef, Props }
+import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
+import akka.cluster.ddata.Replicator.{ Get, GetFailure, GetSuccess, NotFound, ReadLocal, ReadMajority, Update, UpdateSuccess, UpdateTimeout, WriteMajority }
+import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress }
 import akka.cluster.sharding.ClusterSharding
-import akka.persistence.{ PersistentActor, RecoveryCompleted }
 import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.Start
-import com.omnipresent.system.Master.{ ActionPerformed, CreateProducer, CreateQueue, GetQueuesNames }
-import com.omnipresent.system.QueueSystemState.{ AddNewQueue, QueueSystemEvent }
+import com.omnipresent.system.Master.{ ActionPerformed, CreateProducer, CreateQueue, CreateQueueRequest, GetQueuesNames }
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
 
 final case class ProducerCreationResult(created: Boolean)
@@ -24,6 +23,8 @@ object Master {
 
   final case class ActionPerformed(description: String)
 
+  final case class CreateQueueRequest(replyTo: ActorRef, queueName: String)
+
   final case object GetQueuesNames
 
   final case class GetQueue(name: String)
@@ -35,54 +36,56 @@ object Master {
 }
 
 class Master
-  extends PersistentActor
+  extends Actor
   with ActorLogging {
-
-  override val persistenceId: String = "master"
 
   private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
 
   private val pubSubRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.pubSubShardName)
 
-  private var queueSystemState = QueueSystemState.empty
-
   implicit val ec: ExecutionContext = context.dispatcher
+
+  val replicator = DistributedData(context.system).replicator
+
+  implicit val node: SelfUniqueAddress = DistributedData(context.system).selfUniqueAddress
+
+  val QueueDataKey = ORSetKey[String]("queues")
+  val readMajority = ReadMajority(timeout = 1.seconds)
+  val writeMajority = WriteMajority(timeout = 5.seconds)
 
   override def preStart(): Unit = log.info("Akka Messages Master application started")
 
   override def postStop(): Unit = log.info("Akka Messages Master application stopped")
 
-  override def receiveRecover: Receive = {
-
-    case event: QueueSystemEvent =>
-      queueSystemState = queueSystemState.updated(event)
-      log.info("Replayed {}", event.getClass.getSimpleName)
-
-    case RecoveryCompleted =>
-      log.info("Recovery completed")
-
-  }
-
-  override def receiveCommand: Receive = {
+  override def receive: Receive = {
 
     case createProducer: CreateProducer =>
-      //      val result = queueSystemState
-      //        .find(createProducer.queueName)
-      //        .map(queue => queue ! createProducer)
-      //        .isDefined
       sender() ! ProducerCreationResult(false)
 
     case GetQueuesNames =>
-      log.info("Collecting queues names")
-      sender() ! QueuesNames(queueSystemState.queueNames)
+      log.info("Collecting queues names from majority")
+      replicator ! Get(QueueDataKey, readMajority, request = Some(sender()))
 
     case details: CreateQueue =>
       log.info(s"Request to CREATE QUEUE: ${details.name}")
-      persist(AddNewQueue(details.name)) { event ⇒
-        createQueue(details)
-        sender() ! ActionPerformed(s"Queue [${details.name}] created")
-        queueSystemState = queueSystemState.updated(event)
-      }
+      createQueue(details)
+      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = Some(CreateQueueRequest(sender(), details.name)))(_ :+ details.name)
+
+    case g @ GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
+      val value = g.get(QueueDataKey).elements
+      replyTo ! QueuesNames(value)
+    case NotFound(QueueDataKey, Some(replyTo: ActorRef)) =>
+      replyTo ! QueuesNames(Set.empty)
+    case GetFailure(QueueDataKey, Some(replyTo: ActorRef)) =>
+      // ReadMajority failure, try again with local read
+      log.error("Fail to get queue names from majority attempt to get from local")
+      replicator ! Get(QueueDataKey, ReadLocal, Some(replyTo))
+
+    case UpdateSuccess(QueueDataKey, Some(request: CreateQueueRequest)) =>
+      request.replyTo ! ActionPerformed(s"Queue [${request.queueName}] created")
+    case UpdateTimeout(QueueDataKey, Some(request: CreateQueueRequest)) =>
+      log.error(s"Fail to create new queue ${request.queueName}") // TODO handle error case
+
     case _ =>
       log.warning("MISSED MESSAGE?")
   }

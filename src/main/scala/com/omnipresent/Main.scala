@@ -1,23 +1,24 @@
 package com.omnipresent
 
-import akka.actor.{ActorRef, ActorSystem}
-import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
-import akka.cluster.singleton.{ClusterSingletonProxy, ClusterSingletonProxySettings}
+import akka.actor.{ ActorRef, ActorSystem }
+import akka.cluster.ddata.{ DistributedData, SelfUniqueAddress }
+import akka.cluster.sharding.{ ClusterSharding, ClusterShardingSettings }
+import akka.cluster.singleton.{ ClusterSingletonProxy, ClusterSingletonProxySettings }
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import com.omnipresent.model.{Consumer, MessagesQueue}
+import com.omnipresent.model.{ Consumer, MessagesQueue }
 import com.omnipresent.support.ClusterListener
 import com.omnipresent.support.ClusterListener.GetRoutes
 import com.omnipresent.system.Master.CreateQueue
 import com.omnipresent.system.MasterSingleton
 import com.typesafe.config.ConfigFactory
 
-import scala.concurrent.duration.{Duration, _}
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import scala.concurrent.duration.{ Duration, _ }
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.util.{ Failure, Success }
 
 object AkkaMessages {
 
@@ -34,6 +35,8 @@ object AkkaMessages {
         withFallback(ConfigFactory.load())
 
       val system = ActorSystem("akkaMessages", config)
+
+      DistributedData(system).replicator
 
       val consumerRegion = ClusterSharding(system).start(
         typeName = Consumer.shardName,
