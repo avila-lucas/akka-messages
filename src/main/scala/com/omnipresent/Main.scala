@@ -69,14 +69,13 @@ object AkkaMessages {
 
       masterProxy ! CreateQueue(s"queue_$port", 1, 1, 1) // Just an example queue created by default
 
-      if (port == "2551")
-        new HttpApi(system)
+      new HttpApi(system, port.toInt + 10)
     }
   }
 
 }
 
-class HttpApi(_system: ActorSystem) {
+class HttpApi(_system: ActorSystem, port: Int) {
 
   implicit val system: ActorSystem = _system
   implicit val materializer: ActorMaterializer = ActorMaterializer()
@@ -86,7 +85,7 @@ class HttpApi(_system: ActorSystem) {
   (system.actorOf(ClusterListener.props()) ? GetRoutes).mapTo[Route].onComplete {
 
     case Success(routes) =>
-      val serverBinding: Future[Http.ServerBinding] = Http().bindAndHandle(routes, "localhost", 8080)
+      val serverBinding: Future[Http.ServerBinding] = Http().bindAndHandle(routes, "localhost", port)
       serverBinding.onComplete {
         case Success(bound) =>
           println(s"Server online at http://${bound.localAddress.getHostString}:${bound.localAddress.getPort}/")

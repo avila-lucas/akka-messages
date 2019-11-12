@@ -2,13 +2,13 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
-import akka.cluster.ddata.Replicator.{ Get, GetFailure, GetSuccess, NotFound, ReadLocal, ReadMajority, Update, UpdateSuccess, UpdateTimeout, WriteMajority }
-import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress }
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.cluster.ddata.Replicator._
+import akka.cluster.ddata.{DistributedData, ORSet, ORSetKey, SelfUniqueAddress}
 import akka.cluster.sharding.ClusterSharding
 import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.Start
-import com.omnipresent.system.Master.{ ActionPerformed, CreateProducer, CreateQueue, CreateQueueRequest, GetQueuesNames }
+import com.omnipresent.system.Master._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -37,7 +37,7 @@ object Master {
 
 class Master
   extends Actor
-  with ActorLogging {
+    with ActorLogging {
 
   private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
 
@@ -49,7 +49,7 @@ class Master
 
   implicit val node: SelfUniqueAddress = DistributedData(context.system).selfUniqueAddress
 
-  val QueueDataKey = ORSetKey[String]("queues")
+  val QueueDataKey: ORSetKey[String] = ORSetKey("queues")
   val readMajority = ReadMajority(timeout = 1.seconds)
   val writeMajority = WriteMajority(timeout = 5.seconds)
 
@@ -69,20 +69,23 @@ class Master
     case details: CreateQueue =>
       log.info(s"Request to CREATE QUEUE: ${details.name}")
       createQueue(details)
-      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = Some(CreateQueueRequest(sender(), details.name)))(_ :+ details.name)
+      val request = Some(CreateQueueRequest(sender(), details.name))
+      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ details.name)
 
-    case g @ GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
+    case g@GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
       val value = g.get(QueueDataKey).elements
       replyTo ! QueuesNames(value)
+
     case NotFound(QueueDataKey, Some(replyTo: ActorRef)) =>
       replyTo ! QueuesNames(Set.empty)
-    case GetFailure(QueueDataKey, Some(replyTo: ActorRef)) =>
+
+    case GetFailure(QueueDataKey, Some(_: ActorRef)) =>
       // ReadMajority failure, try again with local read
       log.error("Fail to get queue names from majority attempt to get from local")
-      replicator ! Get(QueueDataKey, ReadLocal, Some(replyTo))
 
     case UpdateSuccess(QueueDataKey, Some(request: CreateQueueRequest)) =>
       request.replyTo ! ActionPerformed(s"Queue [${request.queueName}] created")
+
     case UpdateTimeout(QueueDataKey, Some(request: CreateQueueRequest)) =>
       log.error(s"Fail to create new queue ${request.queueName}") // TODO handle error case
 
