@@ -2,13 +2,14 @@ package com.omnipresent.model
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ Actor, ActorLogging, Props }
+import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
 import akka.cluster.sharding.ShardRegion
 import org.apache.commons.lang3.time.StopWatch
 
 object Consumer {
 
-  final case class Job(consumerName: String, jobId: String, deliveryId: Long, watch: StopWatch, transactional: Boolean)
+  final case class Job(consumerName: String, jobId: String, deliveryId: Long, watch: StopWatch, transactional: Boolean,
+    replyTo: ActorRef)
 
   final case class ConsumedJob(jobId: String, deliveryId: Long)
 
@@ -19,7 +20,7 @@ object Consumer {
   }
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
-    case j: Job => (math.abs(j.consumerName.split("_").last.toInt.hashCode) % 100).toString
+    case j: Job => (math.abs(j.consumerName.split("_").last.toLong.hashCode) % 100).toString
   }
 
   val shardName: String = "Consumers"
@@ -38,14 +39,14 @@ class Consumer
       log.info(s"[${job.jobId}] ALREADY CONSUMED")
       sender() ! ConsumedJob(job.jobId, job.deliveryId)
 
-    case job @ Job(_, id, deliveryId, watch, transactional) =>
+    case job @ Job(_, id, deliveryId, watch, transactional, replyTo) =>
       log.info(s"[$id] RECEIVED (consumer)")
-      if (!transactional) sender() ! ConsumedJob(id, deliveryId)
+      if (!transactional) replyTo ! ConsumedJob(id, deliveryId)
 
       Thread.sleep(1000)
 
       log.info(s"[$id] DONE in [${watch.getTime(TimeUnit.SECONDS)}] seconds!")
-      if (transactional) sender() ! ConsumedJob(id, deliveryId)
+      if (transactional) replyTo ! ConsumedJob(id, deliveryId)
       latestJob = Some(job)
 
     case _ => // TODO

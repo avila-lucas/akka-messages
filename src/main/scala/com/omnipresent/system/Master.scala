@@ -2,9 +2,9 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
 import akka.cluster.ddata.Replicator._
-import akka.cluster.ddata.{DistributedData, ORSet, ORSetKey, SelfUniqueAddress}
+import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress }
 import akka.cluster.sharding.ClusterSharding
 import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.Start
@@ -37,7 +37,7 @@ object Master {
 
 class Master
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
 
@@ -72,7 +72,7 @@ class Master
       val request = Some(CreateQueueRequest(sender(), details.name))
       replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ details.name)
 
-    case g@GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
+    case g @ GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
       val value = g.get(QueueDataKey).elements
       replyTo ! QueuesNames(value)
 
