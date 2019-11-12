@@ -2,36 +2,53 @@ package com.omnipresent.model
 
 import java.util.UUID
 
-import akka.actor.{ Actor, ActorLogging }
-import com.omnipresent.model.MessagesQueueProxy.{ Produce, Rejected }
-import com.omnipresent.model.Producer.DeliverJob
+import akka.actor.{ Actor, ActorLogging, Props }
+import akka.cluster.sharding.ShardRegion
+import com.omnipresent.model.MessagesQueueProxy.Rejected
+import com.omnipresent.model.Producer.{ DeliverJob, Produce }
 
 import scala.concurrent.duration.FiniteDuration
 
 object Producer {
 
-  final case class DeliverJob(id: String, queueName: String, transactional: Boolean)
+  final case class Produce(producerName: String, queueName: String, interval: FiniteDuration)
+
+  final case class DeliverJob(id: String, queueName: String)
+
+  def props(): Props = Props[Producer]
+
+  val entityIdExtractor: ShardRegion.ExtractEntityId = {
+    case p: Produce => (p.producerName, p)
+  }
+
+  val shardIdExtractor: ShardRegion.ExtractShardId = {
+    case p: Produce => (math.abs(p.producerName.split("_").last.toLong.hashCode) % 100).toString
+  }
+
+  val shardName: String = "Producers"
 
 }
 
-class Producer(relatedQueue: String, transactional: Boolean) extends Actor with ActorLogging {
+class Producer
+  extends Actor
+  with ActorLogging {
 
   override def receive: Receive = {
-    case Produce(interval) =>
-      produce(interval)
+    case Produce(_, queueName, interval) =>
+      produce(queueName, interval)
     case r: Rejected =>
       log.info(s"Job [${r.id}] REJECTED :(")
     case _ => // TODO
   }
 
-  def produce(interval: FiniteDuration) {
+  def produce(queueName: String, interval: FiniteDuration) {
     val id = UUID.randomUUID().toString
     log.info(s"[$id] Job PRODUCED")
-    sender() ! DeliverJob(id, relatedQueue, transactional)
+    sender() ! DeliverJob(id, queueName)
 
     Thread.sleep(interval.toMillis)
 
-    produce(interval)
+    produce(queueName, interval)
   }
 
 }

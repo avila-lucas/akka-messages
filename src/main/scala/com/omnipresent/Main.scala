@@ -1,7 +1,7 @@
 package com.omnipresent
 
 import akka.actor.{ ActorRef, ActorSystem }
-import akka.cluster.ddata.{ DistributedData, SelfUniqueAddress }
+import akka.cluster.ddata.DistributedData
 import akka.cluster.sharding.{ ClusterSharding, ClusterShardingSettings }
 import akka.cluster.singleton.{ ClusterSingletonProxy, ClusterSingletonProxySettings }
 import akka.http.scaladsl.Http
@@ -9,7 +9,7 @@ import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import com.omnipresent.model.{ Consumer, MessagesQueue }
+import com.omnipresent.model.{ Consumer, MessagesQueue, Producer }
 import com.omnipresent.support.ClusterListener
 import com.omnipresent.support.ClusterListener.GetRoutes
 import com.omnipresent.system.Master.CreateQueue
@@ -38,7 +38,14 @@ object AkkaMessages {
 
       DistributedData(system).replicator
 
-      val consumerRegion = ClusterSharding(system).start(
+      ClusterSharding(system).start(
+        typeName = Producer.shardName,
+        entityProps = Producer.props(),
+        settings = ClusterShardingSettings(system),
+        extractEntityId = Producer.entityIdExtractor,
+        extractShardId = Producer.shardIdExtractor)
+
+      ClusterSharding(system).start(
         typeName = Consumer.shardName,
         entityProps = Consumer.props(),
         settings = ClusterShardingSettings(system),
@@ -47,14 +54,14 @@ object AkkaMessages {
 
       ClusterSharding(system).start(
         typeName = MessagesQueue.broadcastShardName,
-        entityProps = MessagesQueue.props("broadcast", consumerRegion),
+        entityProps = MessagesQueue.props("broadcast"),
         settings = ClusterShardingSettings(system),
         extractEntityId = MessagesQueue.entityIdExtractor,
         extractShardId = MessagesQueue.shardIdExtractor)
 
       ClusterSharding(system).start(
         typeName = MessagesQueue.pubSubShardName,
-        entityProps = MessagesQueue.props("PubSub", consumerRegion),
+        entityProps = MessagesQueue.props("PubSub"),
         settings = ClusterShardingSettings(system),
         extractEntityId = MessagesQueue.entityIdExtractor,
         extractShardId = MessagesQueue.shardIdExtractor)
