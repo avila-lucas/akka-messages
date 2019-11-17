@@ -8,6 +8,7 @@ import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress 
 import akka.cluster.sharding.ClusterSharding
 import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.Start
+import com.omnipresent.support.IdGenerator
 import com.omnipresent.system.Master._
 
 import scala.concurrent.ExecutionContext
@@ -96,9 +97,9 @@ class Master
   private def createQueue(details: CreateQueue) =
     details match {
       case CreateQueue(name, producers, workers, interval, spreadType) if spreadType.equalsIgnoreCase("pubsub") =>
-        pubSubRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+        pubSubRegion ! Start(IdGenerator.getRandomID(name), producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
       case CreateQueue(name, producers, workers, interval, _) =>
-        broadcastRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+        broadcastRegion ! Start(IdGenerator.getRandomID(name), producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
     }
 
 }

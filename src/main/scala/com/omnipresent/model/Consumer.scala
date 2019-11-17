@@ -1,17 +1,13 @@
 package com.omnipresent.model
 
-import java.util.concurrent.TimeUnit
-
 import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
 import akka.cluster.sharding.ShardRegion
-import org.apache.commons.lang3.time.StopWatch
 
 object Consumer {
 
-  final case class Job(consumerName: String, jobId: String, deliveryId: Long, watch: StopWatch, transactional: Boolean,
-    replyTo: ActorRef)
+  final case class Job(consumerName: String, jobId: String, replyTo: ActorRef)
 
-  final case class ConsumedJob(jobId: String, deliveryId: Long)
+  final case class ConsumedJob(jobId: String)
 
   def props(): Props = Props[Consumer]
 
@@ -32,22 +28,23 @@ class Consumer
 
   import Consumer._
 
+  val transactional = true // FIXME - Make sharding region for transactional and not transactional consumers
   var latestJob: Option[Job] = None
 
   def receive: Receive = {
-    case job: Job if latestJob.exists(_.equals(job)) =>
+    case job: Job if !transactional && latestJob.exists(_.equals(job)) =>
       log.info(s"[${job.jobId}] ALREADY CONSUMED")
-      sender() ! ConsumedJob(job.jobId, job.deliveryId)
+      sender() ! ConsumedJob(job.jobId)
 
-    case job @ Job(_, id, deliveryId, watch, transactional, replyTo) =>
+    case job @ Job(_, id, replyTo) =>
       log.info(s"[$id] RECEIVED (consumer)")
-      if (!transactional) replyTo ! ConsumedJob(id, deliveryId)
+      if (!transactional) replyTo ! ConsumedJob(id)
 
       Thread.sleep(1000)
 
-      log.info(s"[$id] DONE in [${watch.getTime(TimeUnit.SECONDS)}] seconds!")
-      if (transactional) replyTo ! ConsumedJob(id, deliveryId)
+      log.info(s"[$id] DONE")
       latestJob = Some(job)
+      if (transactional) replyTo ! ConsumedJob(id)
 
     case _ => // TODO
   }
