@@ -31,8 +31,8 @@ object AkkaMessages {
 
   def startup(ports: Seq[String]): Unit = {
     ports foreach { port =>
-      val config = ConfigFactory.parseString("akka.remote.artery.canonical.port=" + port).
-        withFallback(ConfigFactory.load())
+      val config = ConfigFactory.parseString(s"akka.remote.artery.canonical.port=$port")
+        .withFallback(ConfigFactory.load())
 
       val system = ActorSystem("akkaMessages", config)
 
@@ -74,7 +74,7 @@ object AkkaMessages {
           settings = ClusterSingletonProxySettings(system)),
         name = "masterProxy")
 
-      masterProxy ! CreateQueue(s"queue_$port", 1, 1, 1) // Just an example queue created by default
+      masterProxy ! CreateQueue(s"queue_$port", 1, 1, 30) // Just an example queue created by default
 
       new HttpApi(system, port.toInt + 10)
     }

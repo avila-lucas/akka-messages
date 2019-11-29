@@ -17,6 +17,7 @@ object Consumer {
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
     case j: Job => (math.abs(j.consumerName.split("_").last.toLong.hashCode) % 100).toString
+    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
   }
 
   val shardName: String = "Consumers"
@@ -40,7 +41,7 @@ class Consumer
       log.info(s"[$id] RECEIVED (consumer)")
       if (!transactional) replyTo ! ConsumedJob(id)
 
-      Thread.sleep(1000)
+      Thread.sleep(10000)
 
       log.info(s"[$id] DONE")
       latestJob = Some(job)

@@ -2,12 +2,12 @@ package com.omnipresent.system
 
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
+import akka.actor.{Actor, ActorLogging, ActorRef, Cancellable, Props}
 import akka.cluster.ddata.Replicator._
-import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress }
+import akka.cluster.ddata.{DistributedData, ORSet, ORSetKey, SelfUniqueAddress}
 import akka.cluster.sharding.ClusterSharding
 import com.omnipresent.model.MessagesQueue
-import com.omnipresent.model.MessagesQueue.Start
+import com.omnipresent.model.MessagesQueue.{HeartBeat, Start}
 import com.omnipresent.support.IdGenerator
 import com.omnipresent.system.Master._
 
@@ -21,6 +21,8 @@ final case class QueuesNames(queues: Set[String])
 object Master {
 
   def props: Props = Props(new Master)
+
+  case object CheckQueues
 
   final case class ActionPerformed(description: String)
 
@@ -38,7 +40,7 @@ object Master {
 
 class Master
   extends Actor
-  with ActorLogging {
+    with ActorLogging {
 
   private val broadcastRegion: ActorRef = ClusterSharding(context.system).shardRegion(MessagesQueue.broadcastShardName)
 
@@ -49,6 +51,8 @@ class Master
   val replicator = DistributedData(context.system).replicator
 
   implicit val node: SelfUniqueAddress = DistributedData(context.system).selfUniqueAddress
+
+  val timeoutScheduled: Cancellable = context.system.scheduler.schedule(10.seconds, 10.seconds, self, CheckQueues)
 
   val QueueDataKey: ORSetKey[String] = ORSetKey("queues")
   val readMajority = ReadMajority(timeout = 1.seconds)
@@ -67,13 +71,22 @@ class Master
       log.info("Collecting queues names from majority")
       replicator ! Get(QueueDataKey, readMajority, request = Some(sender()))
 
+    case CheckQueues =>
+      log.info("Time to check QUEUES!")
+      replicator ! Get(QueueDataKey, readMajority, request = Some(sender(), CheckQueues))
+
     case details: CreateQueue =>
       log.info(s"Request to CREATE QUEUE: ${details.name}")
-      createQueue(details)
-      val request = Some(CreateQueueRequest(sender(), details.name))
-      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ details.name)
+      val name = createQueue(details)
+      val request = Some(CreateQueueRequest(sender(), name))
+      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ name)
 
-    case g @ GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
+    case g@GetSuccess(QueueDataKey, Some((_: ActorRef, CheckQueues))) =>
+      val value = g.get(QueueDataKey).elements
+      log.info(s"Checking queues: $value")
+      value.foreach(name => broadcastRegion ! HeartBeat(name))
+
+    case g@GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
       val value = g.get(QueueDataKey).elements
       replyTo ! QueuesNames(value)
 
@@ -94,12 +107,15 @@ class Master
       log.warning("MISSED MESSAGE?")
   }
 
-  private def createQueue(details: CreateQueue) =
+  private def createQueue(details: CreateQueue): String = {
+    val name = IdGenerator.getRandomID(details.name)
     details match {
       case CreateQueue(name, producers, workers, interval, spreadType) if spreadType.equalsIgnoreCase("pubsub") =>
-        pubSubRegion ! Start(IdGenerator.getRandomID(name), producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+        pubSubRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
       case CreateQueue(name, producers, workers, interval, _) =>
-        broadcastRegion ! Start(IdGenerator.getRandomID(name), producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+        broadcastRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
     }
+    name
+  }
 
 }

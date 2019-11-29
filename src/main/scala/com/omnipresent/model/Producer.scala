@@ -23,6 +23,7 @@ object Producer {
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
     case p: Produce => (math.abs(p.producerName.split("_").last.toLong.hashCode) % 100).toString
+    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
   }
 
   val shardName: String = "Producers"
