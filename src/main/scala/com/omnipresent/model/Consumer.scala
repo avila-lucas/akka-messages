@@ -21,6 +21,7 @@ object Consumer {
   }
 
   val shardName: String = "Consumers"
+
 }
 
 class Consumer

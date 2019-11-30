@@ -2,8 +2,8 @@ package com.omnipresent.model
 
 import java.util.UUID
 
-import akka.actor.{ Actor, ActorLogging, Props }
-import akka.cluster.sharding.ShardRegion
+import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
+import akka.cluster.sharding.{ ClusterSharding, ShardRegion }
 import com.omnipresent.model.MessagesQueueProxy.Rejected
 import com.omnipresent.model.Producer.{ DeliverJob, Produce }
 
@@ -11,7 +11,7 @@ import scala.concurrent.duration.FiniteDuration
 
 object Producer {
 
-  final case class Produce(producerName: String, queueName: String, interval: FiniteDuration)
+  final case class Produce(producerName: String, queueName: String, spreadType: String, interval: FiniteDuration)
 
   final case class DeliverJob(id: String, queueName: String)
 
@@ -22,8 +22,8 @@ object Producer {
   }
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
-    case p: Produce => (math.abs(p.producerName.split("_").last.toLong.hashCode) % 100).toString
-    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
+    case p: Produce => (math.abs(p.producerName.split("-").last.toLong.hashCode) % 100).toString
+    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("-").last.toLong.hashCode) % 100).toString
   }
 
   val shardName: String = "Producers"
@@ -35,21 +35,23 @@ class Producer
   with ActorLogging {
 
   override def receive: Receive = {
-    case Produce(_, queueName, interval) =>
-      produce(queueName, interval)
+    case Produce(_, queueName, spreadType, interval) =>
+      val queueShardName: String = if (spreadType.equalsIgnoreCase("PubSub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
+      val queueRegion: ActorRef = ClusterSharding(context.system).shardRegion(queueShardName)
+      produce(queueName, interval, queueRegion)
     case r: Rejected =>
       log.info(s"Job [${r.id}] REJECTED :(")
     case _ => // TODO
   }
 
-  def produce(queueName: String, interval: FiniteDuration) {
+  def produce(queueName: String, interval: FiniteDuration, queueRegion: ActorRef) {
     val id = UUID.randomUUID().toString
     log.info(s"[$id] Job PRODUCED")
-    sender() ! DeliverJob(id, queueName)
+    queueRegion ! DeliverJob(id, queueName)
 
     Thread.sleep(interval.toMillis)
 
-    produce(queueName, interval)
+    produce(queueName, interval, queueRegion)
   }
 
 }

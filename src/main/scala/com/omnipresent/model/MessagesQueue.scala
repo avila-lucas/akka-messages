@@ -1,17 +1,17 @@
 package com.omnipresent.model
 
+import java.math.BigInteger
 import java.util.concurrent.TimeUnit
 
 import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
 import akka.cluster.ddata.Replicator._
-import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress }
+import akka.cluster.ddata.{ DistributedData, FlagKey, ORMapKey, ORMultiMap, ORSet, ORSetKey, PNCounter, PNCounterKey, SelfUniqueAddress }
 import akka.cluster.sharding.{ ClusterSharding, ShardRegion }
-import com.omnipresent.model.Consumer.ConsumedJob
 import com.omnipresent.model.MessagesQueue._
 import com.omnipresent.model.MessagesQueueProxy.FailedReception
 import com.omnipresent.model.Producer.{ DeliverJob, Produce }
 import com.omnipresent.support.IdGenerator
-import com.omnipresent.system.Master.{ CheckQueues, CreateProducer }
+import com.omnipresent.system.Master.CreateProducer
 import org.apache.commons.lang3.time.StopWatch
 
 import scala.concurrent.ExecutionContext
@@ -19,9 +19,13 @@ import scala.concurrent.duration._
 
 object MessagesQueue {
 
+  final case class PreStart(queueName: Option[String], workers: Option[Int])
+
   final case class HeartBeat(queueName: String)
 
   final case class Start(queueName: String, producers: Int, workers: Int, interval: FiniteDuration)
+
+  final case class QueueConsumedJob(queueName: String, jobId: String)
 
   final case class ProxyJob(jobId: String)
 
@@ -42,13 +46,17 @@ object MessagesQueue {
     case h: HeartBeat => (h.queueName, h)
     case d: DeliverJob => (d.queueName, d)
     case g: GetQueue => (g.queueName, g)
+    case q: QueueConsumedJob => (q.queueName, q)
+    case f: FailedReception => (f.queueName, f)
   }
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
-    case s: Start => (math.abs(s.queueName.split("_").last.toLong.hashCode) % 100).toString
-    case h: HeartBeat => (math.abs(h.queueName.split("_").last.toLong.hashCode) % 100).toString
+    case s: Start => (math.abs(s.queueName.hashCode) % 100).toString
+    case h: HeartBeat => (math.abs(h.queueName.hashCode) % 100).toString
     case d: DeliverJob => (math.abs(d.queueName.hashCode) % 100).toString
-    case GetQueue(queueName) => (math.abs(queueName.hashCode) % 100).toString
+    case g: GetQueue => (math.abs(g.queueName.hashCode) % 100).toString
+    case q: QueueConsumedJob => (math.abs(q.queueName.hashCode) % 100).toString
+    case f: FailedReception => (math.abs(f.queueName.hashCode) % 100).toString
     case ShardRegion.StartEntity(id) ⇒
       (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
   }
@@ -63,7 +71,6 @@ class MessagesQueue(spreadType: String)
 
   private val producerRegion: ActorRef = ClusterSharding(context.system).shardRegion(Producer.shardName)
   val queueId: String = IdGenerator.getRandomID("queue")
-  var onGoingJobs: Map[String, OnGoingJob] = Map.empty
   var proxyQueue: Option[ActorRef] = None
 
   implicit val ec: ExecutionContext = context.dispatcher
@@ -71,46 +78,73 @@ class MessagesQueue(spreadType: String)
   val replicator: ActorRef = DistributedData(context.system).replicator
 
   val OnGoingJobsKey: ORSetKey[String] = ORSetKey[String]("queueId")
-  /* Weird thing happened here...if you use the queueId with a random name the Get state fails...
-      now every queue is using the same job queue.
-   */
+  val QueueNameKey: ORSetKey[String] = ORSetKey[String](s"${self.path.name}-queueName")
+  val QueueWorkers: PNCounterKey = PNCounterKey(s"${self.path.name}-workers")
   val readMajority = ReadMajority(timeout = 1.seconds)
   val writeMajority = WriteMajority(timeout = 5.seconds)
 
+  override def preStart(): Unit = {
+    log.info(s"PRE START ${self.path.name}")
+    replicator ! Get(QueueNameKey, readMajority, request = None)
+  }
+
   override def receive: Receive = {
+
+    case g @ GetSuccess(QueueNameKey, _) =>
+      log.info("Pre start queue name")
+      val queueName = g.get(QueueNameKey).elements.head
+      replicator ! Get(QueueWorkers, readMajority, request = Some(PreStart(Some(queueName), None)))
+
+    case g @ GetSuccess(QueueWorkers, Some(PreStart(Some(queueName), _))) =>
+      log.info("Pre start workers")
+      val workers = g.get(QueueWorkers).getValue
+      val proxy = context.actorOf(Props(new MessagesQueueProxy(queueName, spreadType, workers.intValue())), s"${queueName}_PROXY")
+      log.info(s"Proxy queue actor ${proxy}")
+      proxyQueue = Some(proxy)
 
     case HeartBeat(_) =>
       log.info("I'm UPPPPPPPPP")
       replicator ! Get(OnGoingJobsKey, readMajority, request = Some(sender(), "jobs"))
 
-    case g @ GetSuccess(OnGoingJobsKey, Some((replyTo: ActorRef, "jobs"))) =>
+    case g @ GetSuccess(OnGoingJobsKey, Some((_: ActorRef, "jobs"))) =>
       log.info("Printing out jobs")
       val value = g.get(OnGoingJobsKey).elements
       log.info(s"Pending jobs: $value")
 
-    case CreateProducer(_, interval, _) =>
-      producerRegion ! Produce(IdGenerator.getRandomID("producer"), queueId, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
+    case CreateProducer(queueName, interval, _) =>
+      producerRegion ! Produce(IdGenerator.getRandomID("producer"), queueName, spreadType, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
 
-      // FIXME - What happenes if the queue dies? Hard to know
+    // FIXME - What happens if the queue dies? Hard to know
     case Start(queueName, producers, workers, interval) =>
       log.info(s"Starting Queue [$queueId]")
       1 to producers foreach {
         idx =>
-          producerRegion ! Produce(IdGenerator.getRandomID(s"${queueName}-PRODUCER-${idx}"), queueName, interval)
+          producerRegion ! Produce(s"${queueName}-PRODUCER-${idx}", queueName, spreadType, interval)
       }
       log.info(s"[$producers] producers  were created for [$queueId]")
-
-      proxyQueue = Some(context.actorOf(Props(new MessagesQueueProxy(queueName, spreadType, workers)), s"${queueName}_PROXY"))
-      log.info("Proxy queue created")
+      val request = PreStart(Some(queueName), Some(workers))
+      replicator ! Update(QueueNameKey, ORSet.empty[String], writeMajority, Some(request))(_ :+ queueName)
       log.info(s"Finished creating queue [$queueName]")
 
     case job: DeliverJob =>
       val newJob = ProxyJob(job.id)
       val req = Some(AddJob(job.id))
       replicator ! Update(OnGoingJobsKey, ORSet.empty[String], writeMajority, req)(_ :+ job.id)
-      //onGoingJobs = onGoingJobs.updated(job.id, OnGoingJob(newJob, StopWatch.createStarted()))
+      log.info(s"Proxy queue: ${proxyQueue}")
+      proxyQueue.foreach(p => {
+        p ! newJob
+        log.info("Sending job")
+      })
       log.info(s"[${job.id}] RECEIVED (queue)")
-      proxyQueue.foreach(p => p ! newJob)
+
+    case UpdateSuccess(QueueNameKey, Some(request: PreStart)) =>
+      log.info(s"Successfully update queue name")
+      val workers = request.workers.getOrElse(0)
+      replicator ! Update(QueueWorkers, PNCounter.empty, writeMajority, Some(request))(_ :+ workers.toLong)
+
+    case UpdateSuccess(QueueWorkers, Some(_: PreStart)) =>
+      log.info(s"Successfully update workers")
+      preStart()
 
     case UpdateSuccess(_, Some(request: AddJob)) =>
       log.info(s"Successfully added job ${request.jobId}")
@@ -124,16 +158,16 @@ class MessagesQueue(spreadType: String)
     case UpdateTimeout(_, Some(request: RemoveJob)) =>
       log.error(s"Fail to remove job ${request.jobId}") // TODO handle error case
 
-    case ConsumedJob(jobId) =>
+    case QueueConsumedJob(_, jobId) =>
       val removeJob = Some(RemoveJob(jobId))
       replicator ! Update(OnGoingJobsKey, ORSet.empty[String], writeMajority, removeJob)(_.remove(jobId))
 
-    case FailedReception(job, retryWorkers) =>
+    case FailedReception(_, job, retryWorkers) =>
       log.info(s"[${job.jobId}] FAILED JOB, retrying...")
       proxyQueue.map(_ ! RetryJob(job, retryWorkers))
 
     case e =>
-      log.info(s"Missing messageeeeee ${e}")
+      log.info(s"MISSING MESSAGE ${e}")
   }
 
 }

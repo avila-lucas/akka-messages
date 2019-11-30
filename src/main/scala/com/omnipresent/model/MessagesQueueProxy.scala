@@ -1,36 +1,35 @@
 package com.omnipresent.model
 
-import akka.actor.{Actor, ActorLogging, Props, _}
+import akka.actor.{ Actor, ActorLogging, Props, _ }
 import akka.cluster.sharding.ClusterSharding
 import akka.routing._
-import com.omnipresent.model.Consumer.{ConsumedJob, Job}
-import com.omnipresent.model.MessagesQueue.{ProxyJob, RetryJob}
-import com.omnipresent.model.MessagesQueueProxy.{FailedReception, TimedOut}
+import com.omnipresent.model.Consumer.Job
+import com.omnipresent.model.MessagesQueue.{ HeartBeat, ProxyJob, RetryJob }
 import com.omnipresent.support.IdGenerator
-
-import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration._
 
 object MessagesQueueProxy {
 
   final case object TimedOut
 
-  final case class FailedReception(job: ProxyJob, retryWorkers: List[String])
+  final case class FailedReception(queueName: String, job: ProxyJob, retryWorkers: List[String])
 
   final case class Rejected(id: String)
 
   def props: Props = Props[MessagesQueueProxy]
 }
 
-class MessagesQueueProxy(queueName: String,
-                         spreadType: String,
-                         workers: Int)
+class MessagesQueueProxy(
+  queueName: String,
+  spreadType: String,
+  workers: Int)
   extends Actor
-    with ActorLogging {
+  with ActorLogging {
 
   var workersNames: List[String] = List.empty
   var nextWorkerToVisit: Int = 0
   val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
+  val queueShardName: String = if (spreadType.equalsIgnoreCase("PubSub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
+  val queueRegion: ActorRef = ClusterSharding(context.system).shardRegion(queueShardName)
   private val consumerRegion: ActorRef = ClusterSharding(context.system).shardRegion(Consumer.shardName)
 
   override def preStart(): Unit = {
@@ -42,29 +41,27 @@ class MessagesQueueProxy(queueName: String,
     log.info(s"Messages queue proxy started with [${workersNames.size}] workers")
   }
 
-  def receive: Receive = {
+  override def receive: Receive = {
 
     /** Main dispatcher job accordingly to spread type **/
     case job: ProxyJob =>
-      val queue = sender()
-
       spread match { // TODO: Improvement with Composition :)
         case _: BroadcastRoutingLogic =>
-          sendJob(job, workersNames, queue)
+          sendJob(job, workersNames)
         case _: RoundRobinRoutingLogic =>
-          sendJob(job, List(workersNames(nextWorkerToVisit)), queue)
+          sendJob(job, List(workersNames(nextWorkerToVisit)))
           updateNextWorkerToVisit()
       }
 
     /** To retry job with some specific workers **/
     case RetryJob(job, retryWorkers) =>
-      sendJob(job, retryWorkers, sender())
-
-    case _ => // TODO
+      sendJob(job, retryWorkers)
   }
 
-  private def sendJob(job: ProxyJob, workers: List[String], replyTo: ActorRef) = {
-    val waitingConfirmator = context.actorOf(Props(new WaitingConfirmator(workers, job, replyTo)))
+  private def sendJob(job: ProxyJob, workers: List[String]) = {
+    log.info(s"[${job.jobId}] RECEIVED (queue proxy)")
+    val confirmatorProps = Props(new WaitingConfirmator(workers, job, queueName, queueRegion));
+    val waitingConfirmator = context.actorOf(confirmatorProps)
     workers map {
       name =>
         consumerRegion ! Job(
@@ -78,44 +75,6 @@ class MessagesQueueProxy(queueName: String,
     nextWorkerToVisit += 1
     if (nextWorkerToVisit >= workersNames.size)
       nextWorkerToVisit = 0
-  }
-
-}
-
-class WaitingConfirmator(workers: List[String],
-                         job: ProxyJob,
-                         queue: ActorRef)
-  extends Actor
-    with ActorLogging {
-
-  implicit val ex: ExecutionContextExecutor = context.system.dispatcher
-  val timeoutScheduled: Cancellable = context.system.scheduler.scheduleOnce(20.seconds, self, TimedOut)
-  var confirmedJobs: List[String] = List.empty
-
-  override def postStop(): Unit = timeoutScheduled.cancel()
-
-  override def receive: Receive = {
-
-    case consumed: ConsumedJob =>
-      confirmedJobs = sender().path.name :: confirmedJobs
-      log.info(s"[${consumed.jobId}] ACK, killing ${sender().path.name}")
-      sender() ! PoisonPill
-      answerIfDone(consumed)
-
-    case TimedOut =>
-      val failedReceptionFrom = workers.diff(confirmedJobs)
-      log.warning(s"[${job.jobId}] TIMED OUT, failed to receive response from: ${failedReceptionFrom.mkString("[", ",", "]")}")
-      queue ! FailedReception(job, failedReceptionFrom)
-      context stop self
-
-  }
-
-  private def answerIfDone(consumedJob: ConsumedJob): Unit = if (confirmedJobs.size == workers.size) acknowledge(consumedJob)
-
-  private def acknowledge(consumedJob: ConsumedJob) {
-    log.info(s"[${consumedJob.jobId}] ACKNOWLEDGE")
-    queue ! consumedJob
-    context stop self
   }
 
 }
