@@ -9,7 +9,7 @@ import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import com.omnipresent.model.{ Consumer, MessagesQueue, Producer }
+import com.omnipresent.model.{ Consumer, MessagesQueue, Producer, WaitingConfirmator }
 import com.omnipresent.support.ClusterListener
 import com.omnipresent.support.ClusterListener.GetRoutes
 import com.omnipresent.system.Master.CreateQueue
@@ -51,6 +51,20 @@ object AkkaMessages {
         settings = ClusterShardingSettings(system),
         extractEntityId = Consumer.entityIdExtractor,
         extractShardId = Consumer.shardIdExtractor)
+
+      ClusterSharding(system).start(
+        typeName = WaitingConfirmator.broadcastShardName,
+        entityProps = WaitingConfirmator.props("broadcast"),
+        settings = ClusterShardingSettings(system),
+        extractEntityId = WaitingConfirmator.entityIdExtractor,
+        extractShardId = WaitingConfirmator.shardIdExtractor)
+
+      ClusterSharding(system).start(
+        typeName = WaitingConfirmator.pubSubShardName,
+        entityProps = WaitingConfirmator.props("pubsub"),
+        settings = ClusterShardingSettings(system),
+        extractEntityId = WaitingConfirmator.entityIdExtractor,
+        extractShardId = WaitingConfirmator.shardIdExtractor)
 
       ClusterSharding(system).start(
         typeName = Consumer.transactionalShardName,

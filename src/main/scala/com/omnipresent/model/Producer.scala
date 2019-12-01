@@ -1,5 +1,6 @@
 package com.omnipresent.model
 
+import java.time.{ LocalDateTime, ZoneOffset }
 import java.util.UUID
 
 import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
@@ -45,7 +46,7 @@ class Producer
   }
 
   def produce(queueName: String, interval: FiniteDuration, queueRegion: ActorRef) {
-    val id = UUID.randomUUID().toString
+    val id = s"${UUID.randomUUID().toString}-${LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli()}"
     log.info(s"[$id] Job PRODUCED")
     queueRegion ! DeliverJob(id, queueName)
 
