@@ -37,7 +37,7 @@ class Producer
 
   override def receive: Receive = {
     case Produce(_, queueName, spreadType, interval) =>
-      val queueShardName: String = if (spreadType.equalsIgnoreCase("PubSub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
+      val queueShardName: String = if (spreadType.equalsIgnoreCase("pubsub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
       val queueRegion: ActorRef = ClusterSharding(context.system).shardRegion(queueShardName)
       produce(queueName, interval, queueRegion)
     case r: Rejected =>

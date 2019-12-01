@@ -38,7 +38,7 @@ class Consumer(transactional: Boolean)
       log.info(s"[$id] RECEIVED (consumer)")
       if (!transactional) replyTo ! ConsumedJob(id)
 
-      Thread.sleep(5000)
+      Thread.sleep(1000)
 
       log.info(s"[$id] DONE")
       if (transactional) replyTo ! ConsumedJob(id)

@@ -24,8 +24,8 @@ class MessagesQueueProxy(
   extends Actor
   with ActorLogging {
 
-  val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
-  val queueShardName: String = if (spreadType.equalsIgnoreCase("PubSub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
+  val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("pubsub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
+  val queueShardName: String = if (spreadType.equalsIgnoreCase("pubsub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
   val queueRegion: ActorRef = ClusterSharding(context.system).shardRegion(queueShardName)
   val waitingRegion: ActorRef = ClusterSharding(context.system).shardRegion(s"WaitingConfirmator-${spreadType}")
 

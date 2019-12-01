@@ -82,7 +82,7 @@ object AkkaMessages {
 
       ClusterSharding(system).start(
         typeName = MessagesQueue.pubSubShardName,
-        entityProps = MessagesQueue.props("PubSub"),
+        entityProps = MessagesQueue.props("pubsub"),
         settings = ClusterShardingSettings(system),
         extractEntityId = MessagesQueue.entityIdExtractor,
         extractShardId = MessagesQueue.shardIdExtractor)

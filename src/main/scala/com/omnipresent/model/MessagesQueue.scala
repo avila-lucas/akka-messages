@@ -112,7 +112,7 @@ class MessagesQueue(spreadType: String)
       val producers = g.get(QueueProducersKey).getValue.intValue()
       1 to producers foreach {
         idx =>
-          producerRegion ! Produce(s"${queueName}-PRODUCER-${idx}", queueName, spreadType, interval = 2.seconds)
+          producerRegion ! Produce(s"${queueName}-PRODUCER-${idx}", queueName, spreadType, interval = 5.seconds)
       }
       log.info(s"[${producers}] producers  were created for [$queueId]")
 

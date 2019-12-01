@@ -95,6 +95,7 @@ class WaitingConfirmator(spreadType: String)
       initConsumers(start)
 
     case retry: RetryConfirmator =>
+      log.info(s"[${retry.job.jobId}] RETRY JOB (waiting confirmator)")
       replicator ! Get(ConfirmedJobsKey, readMajority, request = Some(RetryTemporalState(retry, None)))
 
     case g @ GetSuccess(ConfirmedJobsKey, Some(RetryTemporalState(retry, _))) =>
@@ -114,9 +115,10 @@ class WaitingConfirmator(spreadType: String)
       context stop self
 
     case g @ GetSuccess(ConsumersKey, Some(RetryTemporalState(retry, Some(confirmedJobs)))) =>
-      log.info("Successfully get consumers")
-      val consumers = g.get(ConsumersKey).elements.toList.diff(confirmedJobs)
-      createConsumers(consumers, retry.job.jobId)
+      val consumers = g.get(ConsumersKey).elements.toList
+      val diffConsumers = consumers.diff(confirmedJobs)
+      log.info(s"Successfully get consumers: ${consumers} confirmedJobs: ${confirmedJobs} diff: ${diffConsumers} ")
+      createConsumers(diffConsumers, retry.job.jobId)
 
     case e => log.info(s"MISSING MESSAGE ${e}")
 
