@@ -9,7 +9,7 @@ object Consumer {
 
   final case class ConsumedJob(jobId: String)
 
-  def props(): Props = Props[Consumer]
+  def props(transactional: Boolean): Props = Props(new Consumer(transactional))
 
   val entityIdExtractor: ShardRegion.ExtractEntityId = {
     case j: Job => (j.consumerName, j)
@@ -20,17 +20,16 @@ object Consumer {
     case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
   }
 
-  val shardName: String = "Consumers"
+  val transactionalShardName: String = "Consumers-Transactional"
+  val nonTransactionalShardName: String = "Consumers-Non-Transactional"
 
 }
 
-class Consumer
+class Consumer(transactional: Boolean)
   extends Actor
   with ActorLogging {
 
   import Consumer._
-
-  val transactional = true // FIXME - Make sharding region for transactional and not transactional consumers
   var latestJob: Option[Job] = None
 
   def receive: Receive = {

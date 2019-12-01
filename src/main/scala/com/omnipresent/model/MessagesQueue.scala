@@ -103,7 +103,7 @@ class MessagesQueue(spreadType: String)
       proxyQueue = Some(proxy)
 
     case HeartBeat(_) =>
-      log.info("I'm UPPPPPPPPP")
+      log.info("HEARTBEAT OK")
       replicator ! Get(OnGoingJobsKey, readMajority, request = Some(sender(), "jobs"))
 
     case g @ GetSuccess(OnGoingJobsKey, Some((_: ActorRef, "jobs"))) =>
@@ -114,7 +114,6 @@ class MessagesQueue(spreadType: String)
     case CreateProducer(queueName, interval, _) =>
       producerRegion ! Produce(IdGenerator.getRandomID("producer"), queueName, spreadType, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
 
-    // FIXME - What happens if the queue dies? Hard to know
     case Start(queueName, producers, workers, interval) =>
       log.info(s"Starting Queue [$queueId]")
       1 to producers foreach {
@@ -131,10 +130,7 @@ class MessagesQueue(spreadType: String)
       val req = Some(AddJob(job.id))
       replicator ! Update(OnGoingJobsKey, ORSet.empty[String], writeMajority, req)(_ :+ job.id)
       log.info(s"Proxy queue: ${proxyQueue}")
-      proxyQueue.foreach(p => {
-        p ! newJob
-        log.info("Sending job")
-      })
+      proxyQueue.foreach(p => p ! newJob)
       log.info(s"[${job.id}] RECEIVED (queue)")
 
     case UpdateSuccess(QueueNameKey, Some(request: PreStart)) =>

@@ -46,8 +46,15 @@ object AkkaMessages {
         extractShardId = Producer.shardIdExtractor)
 
       ClusterSharding(system).start(
-        typeName = Consumer.shardName,
-        entityProps = Consumer.props(),
+        typeName = Consumer.nonTransactionalShardName,
+        entityProps = Consumer.props(false),
+        settings = ClusterShardingSettings(system),
+        extractEntityId = Consumer.entityIdExtractor,
+        extractShardId = Consumer.shardIdExtractor)
+
+      ClusterSharding(system).start(
+        typeName = Consumer.transactionalShardName,
+        entityProps = Consumer.props(true),
         settings = ClusterShardingSettings(system),
         extractEntityId = Consumer.entityIdExtractor,
         extractShardId = Consumer.shardIdExtractor)

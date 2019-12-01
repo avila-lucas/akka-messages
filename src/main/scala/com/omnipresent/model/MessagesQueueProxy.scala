@@ -25,12 +25,13 @@ class MessagesQueueProxy(
   extends Actor
   with ActorLogging {
 
-  var workersNames: List[String] = List.empty
-  var nextWorkerToVisit: Int = 0
   val spread: RoutingLogic = if (spreadType.equalsIgnoreCase("PubSub")) BroadcastRoutingLogic() else RoundRobinRoutingLogic()
   val queueShardName: String = if (spreadType.equalsIgnoreCase("PubSub")) MessagesQueue.pubSubShardName else MessagesQueue.broadcastShardName
   val queueRegion: ActorRef = ClusterSharding(context.system).shardRegion(queueShardName)
-  private val consumerRegion: ActorRef = ClusterSharding(context.system).shardRegion(Consumer.shardName)
+  private val consumerRegion: ActorRef = ClusterSharding(context.system).shardRegion(Consumer.transactionalShardName)
+
+  var workersNames: List[String] = List.empty
+  var nextWorkerToVisit: Int = 0 // FIXME Change this to distributed counter
 
   override def preStart(): Unit = {
     workersNames = 1 to workers map {
