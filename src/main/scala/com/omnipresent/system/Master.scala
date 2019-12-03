@@ -8,8 +8,10 @@ import akka.cluster.ddata.{ DistributedData, ORSet, ORSetKey, SelfUniqueAddress 
 import akka.cluster.sharding.ClusterSharding
 import com.omnipresent.model.MessagesQueue
 import com.omnipresent.model.MessagesQueue.{ HeartBeat, Start }
-import com.omnipresent.support.IdGenerator
 import com.omnipresent.system.Master._
+
+import net.liftweb.json.DefaultFormats
+import net.liftweb.json.Serialization.write
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -79,7 +81,11 @@ class Master
       log.info(s"Request to CREATE QUEUE: ${details.name}")
       val name = createQueue(details)
       val request = Some(CreateQueueRequest(sender(), name))
-      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ name)
+
+      implicit val formats = DefaultFormats
+      val replicatorDataJson = write(details)
+
+      replicator ! Update(QueueDataKey, ORSet.empty[String], writeMajority, request = request)(_ :+ replicatorDataJson)
 
     case g @ GetSuccess(QueueDataKey, Some((_: ActorRef, CheckQueues))) =>
       val value = g.get(QueueDataKey).elements

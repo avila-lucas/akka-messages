@@ -2,7 +2,7 @@ package com.omnipresent
 
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.event.Logging
-import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.model.{ ContentTypes, HttpEntity, StatusCodes }
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.directives.MethodDirectives.{ get, post }
@@ -10,11 +10,11 @@ import akka.http.scaladsl.server.directives.PathDirectives.path
 import akka.http.scaladsl.server.directives.RouteDirectives.complete
 import akka.pattern.ask
 import akka.util.Timeout
-import com.omnipresent.support.JsonSupport
+import com.omnipresent.support.{ JsonSupport, ViewSupport }
 import com.omnipresent.system.Master._
 import com.omnipresent.system.{ ProducerCreationResult, QueuesNames }
 
-import scala.concurrent.Future
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 
 trait QueueRoutes extends JsonSupport {
@@ -33,8 +33,14 @@ trait QueueRoutes extends JsonSupport {
         pathEnd {
           concat(
             get {
-              val queues = (masterProxy ? GetQueuesNames).mapTo[QueuesNames]
-              complete(queues)
+              val queuesJson = Await.result((masterProxy ? GetQueuesNames).mapTo[QueuesNames], Duration.Inf)
+              val data = ViewSupport.parseData(queuesJson.queues)
+
+              val path = System.getProperty("user.dir") + "/src/main/resources/index.html"
+              val source = scala.io.Source.fromFile(path)
+              val lines = try source.mkString finally source.close()
+
+              complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, lines.replace("<QUEUE>", data)))
             },
             post {
               entity(as[CreateQueue]) { queue =>
