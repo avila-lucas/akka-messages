@@ -1,50 +1,46 @@
 package com.omnipresent.model
 
-import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
-import akka.cluster.sharding.ShardRegion
+import akka.actor.{ Actor, ActorLogging, Props }
+import akka.cluster.sharding.{ ClusterSharding, ShardRegion }
+import akka.remote.ContainerFormats.ActorRef
 
 object Consumer {
 
-  final case class Job(consumerName: String, jobId: String, replyTo: ActorRef)
+  final case class Job(consumerName: String, jobId: String, waitingShardName: String)
 
   final case class ConsumedJob(jobId: String)
 
-  def props(): Props = Props[Consumer]
+  def props(transactional: Boolean): Props = Props(new Consumer(transactional))
 
   val entityIdExtractor: ShardRegion.ExtractEntityId = {
     case j: Job => (j.consumerName, j)
   }
 
   val shardIdExtractor: ShardRegion.ExtractShardId = {
-    case j: Job => (math.abs(j.consumerName.split("_").last.toLong.hashCode) % 100).toString
-    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("_").last.toLong.hashCode) % 100).toString
+    case j: Job => (math.abs(j.consumerName.split("-").last.toLong.hashCode) % 100).toString
+    case ShardRegion.StartEntity(id) ⇒ (math.abs(id.split("-").last.toLong.hashCode) % 100).toString
   }
 
-  val shardName: String = "Consumers"
+  val transactionalShardName: String = "Consumers-Transactional"
+  val nonTransactionalShardName: String = "Consumers-Non-Transactional"
+
 }
 
-class Consumer
+class Consumer(transactional: Boolean)
   extends Actor
   with ActorLogging {
 
   import Consumer._
 
-  val transactional = true // FIXME - Make sharding region for transactional and not transactional consumers
-  var latestJob: Option[Job] = None
-
   def receive: Receive = {
-    case job: Job if !transactional && latestJob.exists(_.equals(job)) =>
-      log.info(s"[${job.jobId}] ALREADY CONSUMED")
-      sender() ! ConsumedJob(job.jobId)
-
-    case job @ Job(_, id, replyTo) =>
+    case Job(_, id, waitingShardName) =>
+      val replyTo = ClusterSharding(context.system).shardRegion(waitingShardName)
       log.info(s"[$id] RECEIVED (consumer)")
       if (!transactional) replyTo ! ConsumedJob(id)
 
-      Thread.sleep(10000)
+      Thread.sleep(1000)
 
       log.info(s"[$id] DONE")
-      latestJob = Some(job)
       if (transactional) replyTo ! ConsumedJob(id)
 
     case _ => // TODO
