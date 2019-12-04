@@ -32,7 +32,7 @@ object Master {
 
   final case class GetQueue(name: String)
 
-  final case class CreateQueue(name: String, producers: Int, workers: Int, jobInterval: Long, spreadType: String = "RR")
+  final case class CreateQueue(name: String, producers: Int, workers: Int, jobInterval: Long, spreadType: String = "pubsub")
 
   final case class CreateProducer(queueName: String, interval: Long, transactional: Boolean)
 
@@ -84,7 +84,11 @@ class Master
     case g @ GetSuccess(QueueDataKey, Some((_: ActorRef, CheckQueues))) =>
       val value = g.get(QueueDataKey).elements
       log.info(s"Checking queues: $value")
-      value.foreach(name => broadcastRegion ! HeartBeat(name))
+
+      value.foreach(name => {
+        val region = ClusterSharding(context.system).shardRegion(s"Queues-${name.split("_").head}")
+        region ! HeartBeat(name.split("_").tail.mkString("_"))
+      })
 
     case g @ GetSuccess(QueueDataKey, Some(replyTo: ActorRef)) =>
       val value = g.get(QueueDataKey).elements
@@ -114,7 +118,7 @@ class Master
       case CreateQueue(name, producers, workers, interval, _) =>
         broadcastRegion ! Start(name, producers, workers, FiniteDuration(interval.toLong, TimeUnit.SECONDS))
     }
-    details.name
+    s"${details.spreadType}_${details.name}"
   }
 
 }
